@@ -28,6 +28,7 @@ class URLSubmission(BaseModel):
 class TaskStatus(BaseModel):
     task_id: str
     status: str
+    content_id: Optional[str] = None
     error: Optional[str] = None
 
 class ContentMetadataResponse(BaseModel):
@@ -40,6 +41,7 @@ class ContentMetadataResponse(BaseModel):
     view_count: Optional[int] = None
 
 class ProcessedContent(BaseModel):
+    content_id: str
     metadata: ContentMetadataResponse
     chunks: List[str]
 
@@ -77,24 +79,28 @@ async def process_content_task(
             logger.debug(f"Storing in {content_type} collection")
             
             try:
-                # Convert metadata to dict and ensure all values are primitive types
-                # Filter out None values or replace with defaults
+                # Generate a content ID
+                content_id = str(uuid.uuid4())
+                
+                # Update metadata to include content_id
                 metadata_dict = {
-                    "title": metadata.title or "",  # Use empty string if None
+                    "content_id": content_id,
+                    "title": metadata.title or "",
                     "author": metadata.author or "Unknown",
                     "source_url": str(metadata.source_url),
                     "content_type": metadata.content_type,
                     "duration": metadata.duration or "",
                     "published_date": metadata.published_date or "",
-                    "view_count": metadata.view_count or 0  # Use 0 for numeric field
+                    "view_count": metadata.view_count or 0
                 }
                 logger.debug(f"Converted metadata to dict: {metadata_dict}")
                 
+                # Store in vector store with content_id
                 collection.add(
                     documents=chunks,
                     embeddings=embeddings,
                     metadatas=[metadata_dict] * len(chunks),
-                    ids=[f"{task_id}_{i}" for i in range(len(chunks))]
+                    ids=[f"{content_id}_{i}" for i in range(len(chunks))]
                 )
                 logger.debug("Successfully stored in vector store")
                 
@@ -102,8 +108,10 @@ async def process_content_task(
                 logger.error(f"Error storing in vector store: {str(e)}", exc_info=True)
                 raise
             
+            # Update task status with content_id
             tasks[task_id] = {
                 "status": "completed",
+                "content_id": content_id,
                 "metadata": metadata_dict,
                 "chunks": chunks
             }
@@ -148,6 +156,7 @@ async def submit_content(
 
 @router.get("/task/{task_id}", response_model=TaskStatus)
 async def get_task_status(task_id: str):
+    """Get content processing task status"""
     if task_id not in tasks:
         raise HTTPException(status_code=404, detail="Task not found")
         
@@ -155,7 +164,7 @@ async def get_task_status(task_id: str):
     return TaskStatus(
         task_id=task_id,
         status=task["status"],
-        result=task.get("result"),
+        content_id=task.get("content_id"),
         error=task.get("error")
     )
 
@@ -177,6 +186,7 @@ async def get_processed_content(task_id: str):
         )
     
     response = ProcessedContent(
+        content_id=task["content_id"],
         metadata=ContentMetadataResponse(**task["metadata"]),
         chunks=task["chunks"]
     )
