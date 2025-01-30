@@ -102,7 +102,7 @@ class TutorialGenerator:
                 {{
                     "type": "practice",
                     "title": "Practice Exercises",
-                    "content": "<exercises for readers>",
+                    "content": "<exercises or application activities for readers>",
                     "metadata": {{
                         "difficulty": "beginner|intermediate|advanced"
                     }}
@@ -117,11 +117,12 @@ class TutorialGenerator:
 
         Important:
         1. Ensure all JSON is properly formatted
-        2. Include all required sections
-        3. Make content clear and educational
-        4. Keep code examples practical
-        5. Include appropriate metadata for each section
-        6. All content fields must be strings (use newlines for formatting)
+        2. Include summary, key_points, practice, and notes sections
+        3. Only include code_example section if the content is programming-related
+        4. If the content is not programming-related, omit the code_example section entirely
+        5. Make content clear and educational
+        6. Practice exercises should be relevant to the content type (could be coding exercises, comprehension questions, or practical applications)
+        7. All content fields must be strings (use newlines for formatting)
         """
         
         try:
@@ -230,6 +231,7 @@ class TutorialGenerator:
         """Validate section-specific metadata"""
         for section in tutorial.sections:
             if section.type == 'code_example':
+                # Only validate code_example metadata if the section exists
                 if not section.metadata or 'language' not in section.metadata:
                     return False
             elif section.type == 'practice':
