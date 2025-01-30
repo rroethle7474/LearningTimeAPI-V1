@@ -1,0 +1,37 @@
+graph TD
+    subgraph Layout[Main Layout]
+        subgraph Sidebar[Left Sidebar]
+            Search[Search Bar]
+            Nav[Navigation/Results]
+            Nav --> SC[Section Links<br/>when not searching]
+            Nav --> SR[Search Results<br/>when searching]
+        end
+        
+        subgraph MainContent[Main Content Area]
+            Tabs[Content/Tutorial Tabs]
+            Content[Content View]
+            Tutorial[Tutorial View]
+            Tabs --> Content
+            Tabs --> Tutorial
+            
+            subgraph ContentView[Content View Details]
+                Sections[Scrollable Sections]
+                Headers[Section Headers]
+                Text[Content Text]
+                Timestamps[Timestamp Markers]
+            end
+            
+            subgraph TutorialView[Tutorial View Details]
+                Summary[Key Points]
+                Examples[Code Examples]
+                Practice[Practice Exercises]
+                Notes[Additional Notes]
+            end
+        end
+    end
+
+    style Layout fill:#f5f5f5
+    style Sidebar fill:#ffffff
+    style MainContent fill:#ffffff
+    style ContentView fill:#f8f8f8
+    style TutorialView fill:#f8f8f8
