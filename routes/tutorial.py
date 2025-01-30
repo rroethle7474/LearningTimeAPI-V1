@@ -1,31 +1,61 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
-from typing import Optional
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, status
+from typing import Optional, Dict, Any, List, Literal
+from datetime import datetime
 from pydantic import BaseModel
 import uuid
 from generators.tutorial import TutorialGenerator, ProcessedTutorial
 from db.vector_store import VectorStore
+from embeddings.generator import EmbeddingGenerator
+from llm.factory import LLMFactory
+from config import settings
+from app_types.tutorial import TutorialSectionType
 
-router = APIRouter()
+router = APIRouter(tags=["tutorials"])
 
-# In-memory task storage (replace with proper database in production)
-tutorial_tasks = {}
+# Add dependency injection functions
+def get_tutorial_generator() -> TutorialGenerator:
+    """Dependency injection for TutorialGenerator"""
+    vector_store = VectorStore()
+    embedding_generator = EmbeddingGenerator()
+    if settings.ANTHROPIC_API_KEY:
+        llm_client = LLMFactory.create_client("anthropic", settings.ANTHROPIC_API_KEY)
+    elif settings.OPENAI_API_KEY:
+        llm_client = LLMFactory.create_client("openai", settings.OPENAI_API_KEY)
+    else:
+        raise ValueError("No LLM API keys configured")
+    
+    return TutorialGenerator(llm_client, vector_store, embedding_generator)
+
+def get_vector_store() -> VectorStore:
+    """Dependency injection for VectorStore"""
+    return VectorStore()
 
 class TutorialGenerationRequest(BaseModel):
     content_id: str
-    collection_name: str
+    content_type: Literal["article", "youtube"]  # Add type validation
+
+class TutorialGenerationResponse(BaseModel):
+    tutorial_id: str
+    status: str
+    message: str
+
+class TutorialStatus(BaseModel):
+    status: str
+    tutorial_id: Optional[str] = None
+    error: Optional[str] = None
+    last_updated: datetime
+
+# In-memory status tracking (consider using Redis for production)
+generation_status: Dict[str, TutorialStatus] = {}
+
+# In-memory task storage (replace with proper database in production)
+tutorial_tasks = {}
 
 class TutorialGenerationStatus(BaseModel):
     task_id: str
     status: str
     tutorial: Optional[ProcessedTutorial] = None
     error: Optional[str] = None
-
-# Dependency injection functions
-def get_vector_store():
-    return VectorStore()
-
-def get_tutorial_generator():
-    return TutorialGenerator()
 
 async def generate_tutorial_task(
     content_id: str,
@@ -65,7 +95,7 @@ async def generate_tutorial(
     background_tasks.add_task(
         generate_tutorial_task,
         request.content_id,
-        request.collection_name,
+        request.content_type,
         task_id,
         tutorial_generator
     )

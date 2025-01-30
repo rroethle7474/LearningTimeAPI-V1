@@ -7,8 +7,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from fastapi import FastAPI
-from routes import content, search
-from api.routes import tutorial  # Only import from api.routes
+from routes import content, tutorial, search
 from db.vector_store import VectorStore
 from embeddings.generator import EmbeddingGenerator
 from generators.tutorial import TutorialGenerator
@@ -53,5 +52,5 @@ semantic_search = SemanticSearch(vector_store, embedding_generator)
 
 # Include routers
 app.include_router(content.router, prefix="/api/content", tags=["content"])
-app.include_router(tutorial.router, prefix="/api/tutorial", tags=["tutorial"])
+app.include_router(tutorial.router, prefix="/api/tutorial")
 app.include_router(search.router, prefix="/api/search", tags=["search"]) 
