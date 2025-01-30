@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from typing import Optional
 from pydantic import BaseModel
 import uuid
-from generators.tutorial import TutorialGenerator, TutorialContent
+from generators.tutorial import TutorialGenerator, ProcessedTutorial
 from db.vector_store import VectorStore
 
 router = APIRouter()
@@ -17,7 +17,7 @@ class TutorialGenerationRequest(BaseModel):
 class TutorialGenerationStatus(BaseModel):
     task_id: str
     status: str
-    tutorial: Optional[TutorialContent] = None
+    tutorial: Optional[ProcessedTutorial] = None
     error: Optional[str] = None
 
 # Dependency injection functions
@@ -89,7 +89,7 @@ async def get_tutorial_status(task_id: str):
         error=task.get("error")
     )
 
-@router.get("/content/{tutorial_id}", response_model=TutorialContent)
+@router.get("/content/{tutorial_id}", response_model=ProcessedTutorial)
 async def get_tutorial_content(
     tutorial_id: str,
     vector_store: VectorStore = Depends(get_vector_store)
@@ -100,10 +100,10 @@ async def get_tutorial_content(
         if not tutorial_data or not tutorial_data["documents"]:
             raise HTTPException(status_code=404, detail="Tutorial not found")
             
-        # Convert stored data back to TutorialContent
+        # Convert stored data back to ProcessedTutorial
         # This is a simplified example - you'll need to adjust based on your storage format
         metadata = tutorial_data["metadatas"][0]
-        return TutorialContent(
+        return ProcessedTutorial(
             title=metadata["title"],
             summary=["Summary from stored data"],
             key_points=["Key points from stored data"],

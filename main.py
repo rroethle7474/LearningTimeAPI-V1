@@ -7,7 +7,8 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from fastapi import FastAPI
-from routes import content, tutorial, search
+from routes import content, search
+from api.routes import tutorial  # Only import from api.routes
 from db.vector_store import VectorStore
 from embeddings.generator import EmbeddingGenerator
 from generators.tutorial import TutorialGenerator
