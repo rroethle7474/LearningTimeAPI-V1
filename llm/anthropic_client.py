@@ -3,6 +3,9 @@ import anthropic
 from pydantic import BaseModel
 import json
 from .base import LLMClient, LLMResponse
+import logging
+
+logger = logging.getLogger(__name__)
 
 class AnthropicClient(LLMClient):
     def __init__(
@@ -41,7 +44,8 @@ class AnthropicClient(LLMClient):
             )
             
         except Exception as e:
-            raise Exception(f"Anthropic API error: {str(e)}")
+            logger.error(f"Error generating with Anthropic: {str(e)}")
+            raise
     
     async def generate_structured(
         self,

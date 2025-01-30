@@ -10,6 +10,9 @@ import os
 from dotenv import load_dotenv
 from config import settings
 import logging
+from datetime import datetime
+from llm.base import LLMClient
+from llm.factory import create_llm_client
 
 # Load environment variables from .env file
 load_dotenv()
@@ -30,6 +33,7 @@ class TaskStatus(BaseModel):
     status: str
     content_id: Optional[str] = None
     error: Optional[str] = None
+    summary: Optional[str] = None
 
 class ContentMetadataResponse(BaseModel):
     title: str
@@ -39,6 +43,8 @@ class ContentMetadataResponse(BaseModel):
     duration: Optional[str] = None
     published_date: Optional[str] = None
     view_count: Optional[int] = None
+    summary: Optional[str] = None
+    processed_date: Optional[datetime] = None
 
 class ProcessedContent(BaseModel):
     content_id: str
@@ -53,22 +59,32 @@ async def process_content_task(
     content_type: str,
     task_id: str,
     vector_store: VectorStore,
-    embedding_generator: EmbeddingGenerator
+    embedding_generator: EmbeddingGenerator,
+    llm_client: LLMClient
 ):
     """Background task for content processing"""
     logger.debug(f"Starting content processing task {task_id} for URL: {url}")
     tasks[task_id] = {"status": "processing"}
     
     try:
-        async with ContentProcessor(youtube_api_key=settings.YOUTUBE_API_KEY) as processor:
+        async with ContentProcessor(
+            youtube_api_key=settings.YOUTUBE_API_KEY,
+            llm_client=llm_client
+        ) as processor:
             logger.debug("Created ContentProcessor instance")
             
             # Convert URL to string if it's a HttpUrl object
             url_str = str(url)
             
-            # Process content
+            # Process content and get metadata with summary
             metadata, chunks = await processor.process_content(url_str, content_type)
             logger.debug(f"Successfully processed content, got {len(chunks)} chunks")
+            
+            # Update task status with summary immediately after generation
+            tasks[task_id].update({
+                "status": "processing",
+                "summary": metadata.summary  # Make summary available early
+            })
             
             # Generate embeddings
             embeddings = processor.generate_embeddings(chunks)
@@ -83,7 +99,6 @@ async def process_content_task(
                 content_id = str(uuid.uuid4())
                 logger.info(f"Generated content ID: {content_id}")
                 
-                # Update metadata
                 metadata_dict = {
                     "content_id": content_id,
                     "title": metadata.title or "",
@@ -92,7 +107,9 @@ async def process_content_task(
                     "content_type": metadata.content_type,
                     "duration": metadata.duration or "",
                     "published_date": metadata.published_date or "",
-                    "view_count": metadata.view_count or 0
+                    "view_count": metadata.view_count or 0,
+                    "summary": metadata.summary,
+                    "processed_date": metadata.processed_date.isoformat() if metadata.processed_date else None
                 }
                 
                 # Store using new method
@@ -105,24 +122,26 @@ async def process_content_task(
                 )
                 logger.info(f"Successfully stored content with ID {content_id} in vector store")
                 
+                # Update final task status
+                tasks[task_id] = {
+                    "status": "completed",
+                    "content_id": content_id,
+                    "metadata": metadata_dict,
+                    "chunks": chunks,
+                    "summary": metadata.summary  # Keep summary in final status
+                }
+                logger.info(f"Updated task {task_id} with content_id {content_id}")
+                
             except Exception as e:
-                logger.error(f"Error storing content with ID {content_id}: {str(e)}", exc_info=True)
+                logger.error(f"Error storing content: {str(e)}", exc_info=True)
                 raise
-            
-            # Update task status
-            tasks[task_id] = {
-                "status": "completed",
-                "content_id": content_id,
-                "metadata": metadata_dict,
-                "chunks": chunks
-            }
-            logger.info(f"Updated task {task_id} with content_id {content_id}")
             
     except Exception as e:
         logger.error(f"Error in process_content_task: {str(e)}", exc_info=True)
         tasks[task_id] = {
             "status": "failed",
-            "error": str(e)
+            "error": str(e),
+            "summary": None  # Clear summary on error
         }
 
 # Add dependency for embedding generator
@@ -140,12 +159,18 @@ def get_vector_store(
         persist_directory="./chromadb"
     )
 
+# Add this dependency
+def get_llm_client():
+    """Dependency to get LLM client instance"""
+    return create_llm_client("openai")  # or get from settings
+
 @router.post("/submit", response_model=TaskStatus)
 async def submit_content(
     submission: URLSubmission,
     background_tasks: BackgroundTasks,
     vector_store: VectorStore = Depends(get_vector_store),
-    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
+    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator),
+    llm_client: LLMClient = Depends(get_llm_client)  # Updated dependency
 ):
     """Submit content for processing"""
     try:
@@ -157,7 +182,8 @@ async def submit_content(
             submission.content_type,
             task_id,
             vector_store,
-            embedding_generator
+            embedding_generator,
+            llm_client
         )
         return TaskStatus(task_id=task_id, status="processing")
         
@@ -179,7 +205,8 @@ async def get_task_status(task_id: str):
         task_id=task_id,
         status=task["status"],
         content_id=task.get("content_id"),
-        error=task.get("error")
+        error=task.get("error"),
+        summary=task.get("summary")
     )
 
 @router.get("/{task_id}", response_model=ProcessedContent)

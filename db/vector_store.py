@@ -203,17 +203,49 @@ class VectorStore:
         embeddings: List[List[float]],
         metadata: Dict[str, Any]
     ):
-        """Add content to the appropriate collection"""
+        """Add content chunks and metadata to the appropriate collection"""
+        logger.debug(f"Adding content {content_id} to {content_type} collection")
+        
         collection = self.get_collection(content_type)
-        
-        # Store each chunk with the content_id in metadata
-        chunk_metadatas = []
         chunk_ids = []
+        chunk_metadatas = []
         
-        for i in range(len(chunks)):
-            chunk_metadata = metadata.copy()
-            chunk_metadata["chunk_index"] = i
-            chunk_metadata["content_id"] = content_id
+        # Sanitize metadata to ensure no None values
+        base_metadata = {
+            "content_id": content_id,
+            "title": metadata.get("title", ""),
+            "author": metadata.get("author", "Unknown"),
+            "source_url": metadata.get("source_url", ""),
+            "content_type": metadata.get("content_type", ""),
+            "duration": metadata.get("duration", ""),
+            "published_date": metadata.get("published_date", ""),
+            "view_count": int(metadata.get("view_count", 0)),  # Ensure integer
+            "summary": metadata.get("summary", ""),  # Empty string instead of None
+            "processed_date": metadata.get("processed_date", datetime.utcnow().isoformat())
+        }
+        
+        # Ensure all metadata values are valid types for ChromaDB
+        base_metadata = {
+            k: str(v) if v is not None else ""  # Convert None to empty string
+            for k, v in base_metadata.items()
+        }
+        
+        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            # First chunk gets all metadata including summary
+            if i == 0:
+                chunk_metadata = {
+                    **base_metadata,
+                    "chunk_index": i
+                }
+            else:
+                # Subsequent chunks get basic metadata without summary
+                chunk_metadata = {
+                    "content_id": content_id,
+                    "chunk_index": i,
+                    "title": base_metadata["title"],
+                    "content_type": base_metadata["content_type"]
+                }
+            
             chunk_metadatas.append(chunk_metadata)
             chunk_ids.append(f"{content_id}_{i}")
         
@@ -224,9 +256,10 @@ class VectorStore:
             embeddings=embeddings,
             metadatas=chunk_metadatas
         )
+        logger.debug(f"Successfully added content {content_id} with {len(chunks)} chunks")
 
     def get_content_by_id(self, content_id: str, content_type: str) -> Optional[Dict[str, Any]]:
-        """Get all chunks for a specific content_id"""
+        """Get all chunks and metadata for a specific content_id"""
         collection = self.get_collection(content_type)
         
         # Query for all chunks with this content_id
@@ -237,13 +270,16 @@ class VectorStore:
         if not results or not results["ids"]:
             return None
         
-        # Combine chunks in order
+        # Sort chunks by index
         sorted_indices = sorted(range(len(results["ids"])), 
                               key=lambda i: results["metadatas"][i]["chunk_index"])
+        
+        # Get full metadata from first chunk
+        full_metadata = {k: v for k, v in results["metadatas"][0].items() 
+                        if k not in ["chunk_index"]}
         
         return {
             "content_id": content_id,
             "documents": [results["documents"][i] for i in sorted_indices],
-            "metadata": {k: v for k, v in results["metadatas"][0].items() 
-                        if k not in ["chunk_index", "content_id"]}
+            "metadata": full_metadata
         } 

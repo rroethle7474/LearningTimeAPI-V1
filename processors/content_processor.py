@@ -5,11 +5,13 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
 from sentence_transformers import SentenceTransformer
 from typing import Dict, List, Optional, Tuple, Literal
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, Field
 import asyncio
 import re
 from urllib.parse import urlparse, parse_qs
 import logging
+from datetime import datetime
+from llm.base import LLMClient  # We'll create this next
 
 # At the top of the file, after imports
 logging.basicConfig(level=logging.DEBUG)
@@ -24,10 +26,13 @@ class ContentMetadata(BaseModel):
     duration: Optional[str] = None
     published_date: Optional[str] = None
     view_count: Optional[int] = None
+    summary: Optional[str] = None
+    processed_date: Optional[datetime] = Field(default_factory=datetime.utcnow)
 
     class Config:
         json_encoders = {
-            HttpUrl: str
+            HttpUrl: str,
+            datetime: lambda v: v.isoformat()
         }
 
 class ProcessingError(Exception):
@@ -35,11 +40,12 @@ class ProcessingError(Exception):
     pass
 
 class ContentProcessor:
-    def __init__(self, youtube_api_key: str):
+    def __init__(self, youtube_api_key: str, llm_client: LLMClient):
         """Initialize content processor with necessary clients"""
         self.playwright = None
         self.youtube = build('youtube', 'v3', developerKey=youtube_api_key)
         self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.llm_client = llm_client  # Add LLM client
 
     async def __aenter__(self):
         """Async context manager entry"""
@@ -290,6 +296,27 @@ class ContentProcessor:
         """Generate embeddings for a list of texts"""
         return self.embedding_model.encode(texts).tolist()
 
+    async def generate_summary(self, content: str, metadata: ContentMetadata) -> str:
+        """Generate a summary of the content using LLM"""
+        try:
+            prompt = f"""
+            Please provide a concise summary of the following {metadata.content_type}. 
+            Focus on the main points and key takeaways.
+
+            Title: {metadata.title}
+            Author: {metadata.author}
+            Content:
+            {content[:4000]}  # Limit content length for LLM
+
+            Provide a summary in 2-3 paragraphs.
+            """
+            
+            response = await self.llm_client.generate(prompt)
+            return response.text.strip() if response else ""
+        except Exception as e:
+            logger.error(f"Error generating summary: {str(e)}")
+            return ""
+
     async def process_content(
         self,
         url: str,
@@ -298,16 +325,25 @@ class ContentProcessor:
         """Main method to process content based on type"""
         try:
             logger.debug(f"Processing content of type {content_type} from URL: {url}")
+            
+            # Get initial metadata and chunks
             if content_type == "article":
-                result = await self.process_article(url)
-                logger.debug("Successfully processed article")
-                return result
+                metadata, chunks = await self.process_article(url)
             elif content_type == "youtube":
-                result = await self.process_youtube(url)
-                logger.debug("Successfully processed YouTube video")
-                return result
+                metadata, chunks = await self.process_youtube(url)
             else:
                 raise ValueError(f"Unsupported content type: {content_type}")
+
+            # Generate summary from the first few chunks
+            initial_content = " ".join(chunks[:3])  # Use first 3 chunks for summary
+            summary = await self.generate_summary(initial_content, metadata)
+            
+            # Update metadata with summary
+            metadata.summary = summary
+            
+            logger.debug("Successfully processed content with summary")
+            return metadata, chunks
+            
         except Exception as e:
             logger.error(f"Error in process_content: {str(e)}", exc_info=True)
             raise ProcessingError(f"Error processing content: {str(e)}")

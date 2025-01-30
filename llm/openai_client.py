@@ -1,16 +1,19 @@
-from typing import Optional, List
-from .base import LLMClient, LLMResponse
+from typing import Optional, Dict, Any
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 import json
+from .base import LLMClient, LLMResponse
+import logging
+
+logger = logging.getLogger(__name__)
 
 class OpenAIClient(LLMClient):
     def __init__(
         self,
         api_key: str,
-        model: str = "gpt-4-turbo-preview",
-        **kwargs
+        model: str = "gpt-3.5-turbo"
     ):
+        """Initialize OpenAI client"""
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model
     
@@ -19,39 +22,36 @@ class OpenAIClient(LLMClient):
         prompt: str,
         max_tokens: Optional[int] = None,
         temperature: float = 0.7,
-        stop_sequences: Optional[List[str]] = None
+        stop: Optional[list[str]] = None
     ) -> LLMResponse:
         """Generate text using OpenAI"""
         try:
-            # Only add response_format for supported models
-            kwargs = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": "You are a helpful assistant that generates structured tutorials. Always respond with valid JSON."},
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
                     {"role": "user", "content": prompt}
                 ],
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "stop": stop_sequences,
-            }
-            
-            # Add response_format only for supported models
-            if self.model in ["gpt-4-turbo-preview", "gpt-4-1106-preview", "gpt-3.5-turbo-1106"]:
-                kwargs["response_format"] = {"type": "json_object"}
-            
-            response = await self.client.chat.completions.create(**kwargs)
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stop=stop
+            )
             
             return LLMResponse(
                 text=response.choices[0].message.content,
                 metadata={
                     "model": self.model,
                     "finish_reason": response.choices[0].finish_reason,
-                    "usage": response.usage.model_dump()
+                    "usage": {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                        "total_tokens": response.usage.total_tokens
+                    }
                 }
             )
             
         except Exception as e:
-            raise Exception(f"OpenAI API error: {str(e)}")
+            logger.error(f"Error generating with OpenAI: {str(e)}")
+            raise
     
     async def generate_structured(
         self,
@@ -60,8 +60,19 @@ class OpenAIClient(LLMClient):
         **kwargs
     ) -> BaseModel:
         """Generate structured output using OpenAI"""
-        response = await self.generate(prompt, **kwargs)
+        structured_prompt = f"""
+        {prompt}
+        
+        Provide the response in the following JSON structure:
+        {response_model.model_json_schema()}
+        
+        Response must be valid JSON. Only provide the JSON response, no additional text.
+        """
+        
         try:
-            return response_model.model_validate_json(response.text)
+            response = await self.generate(structured_prompt, **kwargs)
+            json_response = json.loads(response.text)
+            return response_model.model_validate(json_response)
+            
         except Exception as e:
             raise Exception(f"Failed to parse structured response: {str(e)}") 
