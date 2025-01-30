@@ -8,6 +8,9 @@ import uuid
 import json
 import re
 from typing import Literal
+import logging
+
+logger = logging.getLogger(__name__)
 
 class TutorialSection(BaseModel):
     id: str
@@ -40,38 +43,39 @@ class TutorialGenerator:
     
     async def _generate_tutorial_content(self, content: str, metadata: dict) -> ProcessedTutorial:
         """Generate tutorial content using LLM"""
-        # Updated prompt for structured output
+        logger.debug(f"Received metadata: {metadata}")
+        # Updated prompt for OpenAI
         prompt = f"""
-        Create a comprehensive tutorial based on the following content. Format your response as a JSON object with specific sections.
-        
+        Create a comprehensive tutorial based on the following content. Your response must be a valid JSON object.
+
         Content to process:
         {content}
 
-        Required JSON structure:
+        Follow this exact JSON structure:
         {{
             "sections": [
                 {{
                     "type": "summary",
                     "title": "Overview",
-                    "content": "Clear overview of main concepts"
+                    "content": "<single string with paragraphs separated by newlines>"
                 }},
                 {{
                     "type": "key_points",
                     "title": "Key Points",
-                    "content": "Important takeaways and learning points"
+                    "content": "<single string with bullet points separated by newlines>"
                 }},
                 {{
                     "type": "code_example",
                     "title": "Code Examples",
-                    "content": "Code samples with explanations",
+                    "content": "<code samples with explanations>",
                     "metadata": {{
-                        "language": "programming language used"
+                        "language": "<programming language used>"
                     }}
                 }},
                 {{
                     "type": "practice",
                     "title": "Practice Exercises",
-                    "content": "Exercise description",
+                    "content": "<exercises for readers>",
                     "metadata": {{
                         "difficulty": "beginner|intermediate|advanced"
                     }}
@@ -79,38 +83,44 @@ class TutorialGenerator:
                 {{
                     "type": "notes",
                     "title": "Additional Notes",
-                    "content": "Additional resources or notes"
+                    "content": "<any additional information>"
                 }}
             ]
         }}
 
-        Guidelines:
-        - Ensure each section is properly formatted and contains relevant information
-        - For code examples, include both the code and explanations
-        - Make practice exercises actionable and clear
-        - Include relevant metadata for code and practice sections
-        - Keep the content focused and well-structured
+        Important:
+        1. Ensure all JSON is properly formatted
+        2. Include all required sections
+        3. Make content clear and educational
+        4. Keep code examples practical
+        5. Include appropriate metadata for each section
+        6. All content fields must be strings (use newlines for formatting)
         """
         
-        # Get LLM response
-        tutorial_text = await self.llm.generate(prompt)
-        
-        # Parse the LLM response
         try:
-            # Extract JSON from the response (in case LLM includes additional text)
-            json_match = re.search(r'\{[\s\S]*\}', tutorial_text)
-            if not json_match:
-                raise ValueError("No JSON found in LLM response")
+            # Get LLM response - extract the text from LLMResponse
+            response = await self.llm.generate(prompt)
+            tutorial_text = response.text
+            tutorial_data = json.loads(tutorial_text)
             
-            tutorial_data = json.loads(json_match.group())
+            def format_content(content_data: Any) -> str:
+                """Convert content to proper string format"""
+                if isinstance(content_data, list):
+                    # Convert list to bullet-point string
+                    return "\n".join(f"• {item}" for item in content_data)
+                elif isinstance(content_data, str):
+                    return content_data
+                else:
+                    # Convert any other type to string
+                    return str(content_data)
             
-            # Create ProcessedTutorial object
+            # Create ProcessedTutorial object with content formatting
             tutorial = ProcessedTutorial(
                 metadata=TutorialMetadata(
                     title=metadata.get("title", "Tutorial"),
-                    content_id=metadata.get("id"),
-                    source_url=metadata.get("url"),
-                    content_type=metadata.get("type"),
+                    content_id=metadata.get("content_id"),
+                    source_url=metadata.get("source_url"),
+                    content_type=metadata.get("content_type"),
                     generated_date=datetime.utcnow()
                 ),
                 sections=[
@@ -118,7 +128,7 @@ class TutorialGenerator:
                         id=str(uuid.uuid4()),
                         type=section["type"],
                         title=section["title"],
-                        content=section["content"],
+                        content=format_content(section["content"]),  # Format the content
                         metadata=section.get("metadata")
                     )
                     for section in tutorial_data["sections"]
@@ -132,9 +142,9 @@ class TutorialGenerator:
             return ProcessedTutorial(
                 metadata=TutorialMetadata(
                     title=metadata.get("title", "Tutorial"),
-                    content_id=metadata.get("id"),
-                    source_url=metadata.get("url"),
-                    content_type=metadata.get("type"),
+                    content_id=metadata.get("content_id"),
+                    source_url=metadata.get("source_url"),
+                    content_type=metadata.get("content_type"),
                     generated_date=datetime.utcnow()
                 ),
                 sections=[
@@ -142,7 +152,7 @@ class TutorialGenerator:
                         id=str(uuid.uuid4()),
                         type="summary",
                         title="Overview",
-                        content=tutorial_text[:1000]  # Use first 1000 chars as summary
+                        content=tutorial_text[:1000]
                     )
                 ]
             )
@@ -150,20 +160,27 @@ class TutorialGenerator:
     async def generate_tutorial(
         self,
         content_id: str,
-        collection_name: str
+        content_type: str
     ) -> ProcessedTutorial:
         """Generate a tutorial from stored content"""
-        # Get content from vector store
-        content_data = self.vector_store.get_by_id(collection_name, content_id)
+        logger.debug(f"Generating tutorial for content_id: {content_id}, type: {content_type}")
         
-        if not content_data or not content_data["documents"]:
+        content_data = self.vector_store.get_content_by_id(content_id, content_type)
+        logger.debug(f"Retrieved content data with metadata: {content_data['metadata']}")
+        
+        if not content_data:
             raise ValueError(f"Content not found for ID: {content_id}")
         
-        content = content_data["documents"][0]
-        metadata = content_data["metadatas"][0]
+        # Combine chunks into full content
+        full_content = " ".join(content_data["documents"])
         
-        # Generate tutorial
-        tutorial = await self._generate_tutorial_content(content, metadata)
+        # Add content_id to metadata
+        metadata = content_data["metadata"]
+        metadata["content_id"] = content_id
+        logger.debug(f"Updated metadata with content_id: {metadata}")
+        
+        # Generate tutorial with updated metadata
+        tutorial = await self._generate_tutorial_content(full_content, metadata)
         
         # Generate embedding for the entire tutorial
         tutorial_text = f"{tutorial.metadata.title} " + " ".join(

@@ -12,23 +12,33 @@ from app_types.tutorial import TutorialSectionType
 
 router = APIRouter(tags=["tutorials"])
 
-# Add dependency injection functions
-def get_tutorial_generator() -> TutorialGenerator:
-    """Dependency injection for TutorialGenerator"""
-    vector_store = VectorStore()
-    embedding_generator = EmbeddingGenerator()
-    if settings.ANTHROPIC_API_KEY:
-        llm_client = LLMFactory.create_client("anthropic", settings.ANTHROPIC_API_KEY)
-    elif settings.OPENAI_API_KEY:
-        llm_client = LLMFactory.create_client("openai", settings.OPENAI_API_KEY)
-    else:
-        raise ValueError("No LLM API keys configured")
-    
-    return TutorialGenerator(llm_client, vector_store, embedding_generator)
+# Update the dependency injection functions
+def get_embedding_generator():
+    """Dependency to get embedding generator instance"""
+    from main import embedding_generator
+    return embedding_generator
 
-def get_vector_store() -> VectorStore:
-    """Dependency injection for VectorStore"""
-    return VectorStore()
+def get_vector_store(
+    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
+):
+    """Dependency to get vector store instance"""
+    return VectorStore(
+        embedding_generator=embedding_generator,
+        persist_directory="./chromadb"
+    )
+
+def get_llm_client():
+    """Dependency to get LLM client instance"""
+    from main import llm_client
+    return llm_client
+
+def get_tutorial_generator(
+    llm_client = Depends(get_llm_client),
+    vector_store: VectorStore = Depends(get_vector_store),
+    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
+):
+    """Dependency injection for TutorialGenerator"""
+    return TutorialGenerator(llm_client, vector_store, embedding_generator)
 
 class TutorialGenerationRequest(BaseModel):
     content_id: str

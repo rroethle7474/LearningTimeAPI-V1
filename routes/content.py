@@ -81,8 +81,9 @@ async def process_content_task(
             try:
                 # Generate a content ID
                 content_id = str(uuid.uuid4())
+                logger.info(f"Generated content ID: {content_id}")
                 
-                # Update metadata to include content_id
+                # Update metadata
                 metadata_dict = {
                     "content_id": content_id,
                     "title": metadata.title or "",
@@ -93,28 +94,29 @@ async def process_content_task(
                     "published_date": metadata.published_date or "",
                     "view_count": metadata.view_count or 0
                 }
-                logger.debug(f"Converted metadata to dict: {metadata_dict}")
                 
-                # Store in vector store with content_id
-                collection.add(
-                    documents=chunks,
+                # Store using new method
+                vector_store.add_content(
+                    content_id=content_id,
+                    content_type=content_type,
+                    chunks=chunks,
                     embeddings=embeddings,
-                    metadatas=[metadata_dict] * len(chunks),
-                    ids=[f"{content_id}_{i}" for i in range(len(chunks))]
+                    metadata=metadata_dict
                 )
-                logger.debug("Successfully stored in vector store")
+                logger.info(f"Successfully stored content with ID {content_id} in vector store")
                 
             except Exception as e:
-                logger.error(f"Error storing in vector store: {str(e)}", exc_info=True)
+                logger.error(f"Error storing content with ID {content_id}: {str(e)}", exc_info=True)
                 raise
             
-            # Update task status with content_id
+            # Update task status
             tasks[task_id] = {
                 "status": "completed",
                 "content_id": content_id,
                 "metadata": metadata_dict,
                 "chunks": chunks
             }
+            logger.info(f"Updated task {task_id} with content_id {content_id}")
             
     except Exception as e:
         logger.error(f"Error in process_content_task: {str(e)}", exc_info=True)
@@ -123,15 +125,27 @@ async def process_content_task(
             "error": str(e)
         }
 
-# Move VectorStore initialization to a dependency
-def get_vector_store():
-    return VectorStore()
+# Add dependency for embedding generator
+def get_embedding_generator():
+    """Dependency to get embedding generator instance"""
+    from main import embedding_generator  # Import from main where it's initialized
+    return embedding_generator
+
+def get_vector_store(
+    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
+):
+    """Dependency to get vector store instance"""
+    return VectorStore(
+        embedding_generator=embedding_generator,
+        persist_directory="./chromadb"
+    )
 
 @router.post("/submit", response_model=TaskStatus)
 async def submit_content(
     submission: URLSubmission,
     background_tasks: BackgroundTasks,
-    vector_store: VectorStore = Depends(get_vector_store)
+    vector_store: VectorStore = Depends(get_vector_store),
+    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
 ):
     """Submit content for processing"""
     try:
@@ -139,11 +153,11 @@ async def submit_content(
         print(f"Task ID: {task_id}")
         background_tasks.add_task(
             process_content_task,
-            str(submission.url),  # Convert to string here
+            str(submission.url),
             submission.content_type,
             task_id,
             vector_store,
-            EmbeddingGenerator()
+            embedding_generator
         )
         return TaskStatus(task_id=task_id, status="processing")
         
@@ -169,7 +183,10 @@ async def get_task_status(task_id: str):
     )
 
 @router.get("/{task_id}", response_model=ProcessedContent)
-async def get_processed_content(task_id: str):
+async def get_processed_content(
+    task_id: str,
+    vector_store: VectorStore = Depends(get_vector_store)
+):
     """Get the processed content for a completed task"""
     if task_id not in tasks:
         logger.debug(f"Task {task_id} not found in tasks")
@@ -192,3 +209,15 @@ async def get_processed_content(task_id: str):
     )
     logger.debug(f"Returning response: {response.model_dump_json(indent=2)}")
     return response 
+
+@router.get("/debug/collection/{collection_name}")
+async def inspect_collection(
+    collection_name: str,
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """Debug endpoint to inspect collection contents"""
+    try:
+        inspection = vector_store.inspect_collection(collection_name)
+        return inspection
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) 

@@ -3,15 +3,24 @@ from chromadb.config import Settings
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from app_types.tutorial import TutorialSectionType
+import logging
+from embeddings.generator import EmbeddingGenerator  # Add this import
+
+logger = logging.getLogger(__name__)
 
 class VectorStore:
-    def __init__(self, persist_directory: str = "./chromadb"):
+    def __init__(
+        self, 
+        embedding_generator: EmbeddingGenerator,  # Make it required and typed
+        persist_directory: str = "./chromadb",
+    ):
         """Initialize ChromaDB client and collections"""
         # self.client = chromadb.Client(Settings(
         #     chroma_db_impl="duckdb+parquet",
         #     persist_directory=persist_directory
         # ))
         self.client = chromadb.Client()
+        self.embedding_generator = embedding_generator
         self._init_collections()
     
     def _init_collections(self):
@@ -174,4 +183,77 @@ class VectorStore:
             query_embeddings=[query_embeddings],
             n_results=n_results,
             where=where_clause
-        ) 
+        )
+
+    def inspect_collection(self, collection_name: str) -> Dict[str, Any]:
+        """Debug helper to inspect collection contents"""
+        collection = self.get_collection(collection_name)
+        try:
+            # Get all items in collection
+            results = collection.get()
+            return {
+                "count": len(results["ids"]) if results["ids"] else 0,
+                "ids": results["ids"],
+                "metadatas": results["metadatas"],
+                "sample": {
+                    "ids": results["ids"][:5] if results["ids"] else [],
+                    "metadatas": results["metadatas"][:5] if results["metadatas"] else [],
+                    "documents": results["documents"][:5] if results["documents"] else []
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error inspecting collection {collection_name}: {str(e)}")
+            return {"error": str(e)}
+
+    def add_content(
+        self,
+        content_id: str,
+        content_type: str,
+        chunks: List[str],
+        embeddings: List[List[float]],
+        metadata: Dict[str, Any]
+    ):
+        """Add content to the appropriate collection"""
+        collection = self.get_collection(content_type)
+        
+        # Store each chunk with the content_id in metadata
+        chunk_metadatas = []
+        chunk_ids = []
+        
+        for i in range(len(chunks)):
+            chunk_metadata = metadata.copy()
+            chunk_metadata["chunk_index"] = i
+            chunk_metadata["content_id"] = content_id
+            chunk_metadatas.append(chunk_metadata)
+            chunk_ids.append(f"{content_id}_{i}")
+        
+        # Add to collection
+        collection.add(
+            ids=chunk_ids,
+            documents=chunks,
+            embeddings=embeddings,
+            metadatas=chunk_metadatas
+        )
+
+    def get_content_by_id(self, content_id: str, content_type: str) -> Optional[Dict[str, Any]]:
+        """Get all chunks for a specific content_id"""
+        collection = self.get_collection(content_type)
+        
+        # Query for all chunks with this content_id
+        results = collection.get(
+            where={"content_id": content_id}
+        )
+        
+        if not results or not results["ids"]:
+            return None
+        
+        # Combine chunks in order
+        sorted_indices = sorted(range(len(results["ids"])), 
+                              key=lambda i: results["metadatas"][i]["chunk_index"])
+        
+        return {
+            "content_id": content_id,
+            "documents": [results["documents"][i] for i in sorted_indices],
+            "metadata": {k: v for k, v in results["metadatas"][0].items() 
+                        if k not in ["chunk_index", "content_id"]}
+        } 

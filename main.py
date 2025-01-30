@@ -35,18 +35,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize services
-vector_store = VectorStore()
+# Initialize services in the correct order
 embedding_generator = EmbeddingGenerator()
+vector_store = VectorStore(
+    persist_directory=settings.CHROMADB_PATH,
+    embedding_generator=embedding_generator  # Pass the embedding generator
+)
 
-# Initialize LLM client (choose provider based on available API keys)
-if settings.ANTHROPIC_API_KEY:
-    llm_client = LLMFactory.create_client("anthropic", settings.ANTHROPIC_API_KEY)
-elif settings.OPENAI_API_KEY:
+# Initialize LLM client (prioritize OpenAI over Anthropic)
+if settings.OPENAI_API_KEY:
     llm_client = LLMFactory.create_client("openai", settings.OPENAI_API_KEY)
+elif settings.ANTHROPIC_API_KEY:
+    llm_client = LLMFactory.create_client("anthropic", settings.ANTHROPIC_API_KEY)
 else:
     raise ValueError("No LLM API keys configured")
 
+# Initialize other services that depend on the above
 tutorial_generator = TutorialGenerator(llm_client, vector_store, embedding_generator)
 semantic_search = SemanticSearch(vector_store, embedding_generator)
 

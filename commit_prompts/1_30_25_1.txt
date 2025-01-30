@@ -1,0 +1,8 @@
+Thanks for making these changes. Looks like we have an issue somewhere with retrieving the content for tutorial generation from the chromadb.
+
+Here is the console logs from the front end with the polling requests. It seems that it's passing the proper content Id with the task, but for some reason no content is being found. I'm also attaching the logs from this API showing the content_id.
+
+Finally, the ending logs that should match with the polling responses from the console.log.
+
+Is it possible, I'm not saving the content correctly within my chroma db? Perhaps I haven't set this up correctly? Is their anyway for me to view this?
+

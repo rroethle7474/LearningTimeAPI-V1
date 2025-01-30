@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
+from db.vector_store import VectorStore
+from embeddings.generator import EmbeddingGenerator
 from search.semantic_search import SemanticSearch
 
 router = APIRouter()
@@ -19,10 +21,26 @@ class MultiCollectionSearchResponse(BaseModel):
     query: str
     collections: Dict[str, List[SearchResult]]
 
-def get_semantic_search():
-    # This should be properly initialized with dependencies
-    from main import semantic_search
-    return semantic_search
+def get_embedding_generator():
+    """Dependency to get embedding generator instance"""
+    from main import embedding_generator
+    return embedding_generator
+
+def get_vector_store(
+    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
+):
+    """Dependency to get vector store instance"""
+    return VectorStore(
+        embedding_generator=embedding_generator,
+        persist_directory="./chromadb"
+    )
+
+def get_semantic_search(
+    vector_store: VectorStore = Depends(get_vector_store),
+    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
+):
+    """Dependency to get semantic search instance"""
+    return SemanticSearch(vector_store, embedding_generator)
 
 @router.get("/single", response_model=SearchResponse)
 async def search_single_collection(
@@ -98,4 +116,4 @@ async def find_similar_content(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
