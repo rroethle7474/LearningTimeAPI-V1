@@ -17,7 +17,7 @@ class TutorialSection(BaseModel):
     type: TutorialSectionType
     title: str
     content: str
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = {}
 
 class TutorialMetadata(BaseModel):
     title: str
@@ -41,6 +41,33 @@ class TutorialGenerator:
         self.vector_store = vector_store
         self.embedding_generator = embedding_generator
     
+    def create_tutorial_section(self, section: dict) -> TutorialSection:
+        """Helper method to create a tutorial section with validation and logging"""
+        logger.debug(f"Creating TutorialSection with type: {section['type']}")
+        
+        if not self.validate_section_type(section["type"]):
+            logger.error(f"Invalid section type: {section['type']}")
+            raise ValueError(f"Invalid section type: {section['type']}")
+        
+        try:
+            # Ensure metadata is always a dict, never None
+            metadata = section.get("metadata", {})
+            if metadata is None:
+                metadata = {}
+            
+            tutorial_section = TutorialSection(
+                id=str(uuid.uuid4()),
+                type=section["type"],
+                title=section["title"],
+                content=self.format_content(section["content"]),
+                metadata=metadata  # Use the sanitized metadata
+            )
+            logger.debug(f"Successfully created TutorialSection with type: {tutorial_section.type}")
+            return tutorial_section
+        except Exception as e:
+            logger.error(f"Error creating TutorialSection: {str(e)}")
+            raise
+
     async def _generate_tutorial_content(self, content: str, metadata: dict) -> ProcessedTutorial:
         """Generate tutorial content using LLM"""
         logger.debug(f"Received metadata: {metadata}")
@@ -102,19 +129,9 @@ class TutorialGenerator:
             response = await self.llm.generate(prompt)
             tutorial_text = response.text
             tutorial_data = json.loads(tutorial_text)
+            print("IS THIS THE RESPONSE", tutorial_data)
             
-            def format_content(content_data: Any) -> str:
-                """Convert content to proper string format"""
-                if isinstance(content_data, list):
-                    # Convert list to bullet-point string
-                    return "\n".join(f"• {item}" for item in content_data)
-                elif isinstance(content_data, str):
-                    return content_data
-                else:
-                    # Convert any other type to string
-                    return str(content_data)
-            
-            # Create ProcessedTutorial object with content formatting
+            # Move format_content to be a method of the class
             tutorial = ProcessedTutorial(
                 metadata=TutorialMetadata(
                     title=metadata.get("title", "Tutorial"),
@@ -124,13 +141,7 @@ class TutorialGenerator:
                     generated_date=datetime.utcnow()
                 ),
                 sections=[
-                    TutorialSection(
-                        id=str(uuid.uuid4()),
-                        type=section["type"],
-                        title=section["title"],
-                        content=format_content(section["content"]),  # Format the content
-                        metadata=section.get("metadata")
-                    )
+                    self.create_tutorial_section(section)
                     for section in tutorial_data["sections"]
                 ]
             )
@@ -152,11 +163,23 @@ class TutorialGenerator:
                         id=str(uuid.uuid4()),
                         type="summary",
                         title="Overview",
-                        content=tutorial_text[:1000]
+                        content=tutorial_text[:1000],
+                        metadata={}  # Use empty dict instead of None
                     )
                 ]
             )
-    
+
+    def format_content(self, content_data: Any) -> str:
+        """Convert content to proper string format"""
+        if isinstance(content_data, list):
+            # Convert list to bullet-point string
+            return "\n".join(f"• {item}" for item in content_data)
+        elif isinstance(content_data, str):
+            return content_data
+        else:
+            # Convert any other type to string
+            return str(content_data)
+
     async def generate_tutorial(
         self,
         content_id: str,
@@ -212,4 +235,9 @@ class TutorialGenerator:
             elif section.type == 'practice':
                 if not section.metadata or 'difficulty' not in section.metadata:
                     return False
-        return True 
+        return True
+
+    def validate_section_type(self, section_type: str) -> bool:
+        """Validate that a section type is valid"""
+        valid_types = {'summary', 'key_points', 'code_example', 'practice', 'notes'}
+        return section_type in valid_types 

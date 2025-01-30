@@ -5,6 +5,7 @@ from datetime import datetime
 from app_types.tutorial import TutorialSectionType
 import logging
 from embeddings.generator import EmbeddingGenerator  # Add this import
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -54,67 +55,56 @@ class VectorStore:
             }
         )
     
-    def add_tutorial(self, tutorial_id: str, tutorial_data: Dict[str, Any], embeddings: List[float]):
-        """
-        Add a tutorial with its sections to the database
-        """
-        # Store the tutorial metadata
+    def add_tutorial(
+        self,
+        tutorial_id: str,
+        tutorial_data: dict,
+        embeddings: List[float]
+    ) -> None:
+        """Add a tutorial to the vector store"""
+        # Create a deep copy and process all data for storage
+        processed_tutorial_data = tutorial_data.copy()
+        
+        # Convert datetime to ISO format string
+        if isinstance(processed_tutorial_data["metadata"]["generated_date"], datetime):
+            processed_tutorial_data["metadata"]["generated_date"] = processed_tutorial_data["metadata"]["generated_date"].isoformat()
+        
+        # Serialize any dictionary metadata in sections
+        for section in processed_tutorial_data["sections"]:
+            if isinstance(section["metadata"], dict):
+                section["metadata"] = json.dumps(section["metadata"])
+        
         self.tutorials.add(
             ids=[tutorial_id],
+            documents=[json.dumps(processed_tutorial_data)],
             embeddings=[embeddings],
-            documents=[tutorial_data["metadata"]["title"]],
-            metadatas=[{
-                "title": tutorial_data["metadata"]["title"],
-                "content_id": tutorial_data["metadata"]["content_id"],
-                "source_url": tutorial_data["metadata"]["source_url"],
-                "content_type": tutorial_data["metadata"]["content_type"],
-                "generated_date": tutorial_data["metadata"]["generated_date"].isoformat(),
-                "section_count": len(tutorial_data["sections"])
-            }]
+            metadatas=[{"type": "tutorial"}]
         )
 
-        # Store each section with a reference to the tutorial
-        for section in tutorial_data["sections"]:
-            section_embedding = self.embedding_generator.generate([section["content"]])[0]
-            self.tutorial_sections.add(
-                ids=[section["id"]],
-                embeddings=[section_embedding],
-                documents=[section["content"]],
-                metadatas=[{
-                    "tutorial_id": tutorial_id,
-                    "type": section["type"],
-                    "title": section["title"],
-                    "metadata": section.get("metadata", {}),
-                }]
-            )
-
     def get_tutorial_with_sections(self, tutorial_id: str) -> Dict[str, Any]:
-        """
-        Retrieve a tutorial with all its sections
-        """
-        # Get tutorial metadata
+        """Retrieve a tutorial with all its sections"""
         tutorial = self.tutorials.get(ids=[tutorial_id])
         if not tutorial or not tutorial["documents"]:
             raise ValueError(f"Tutorial not found: {tutorial_id}")
         
-        # Get all sections for this tutorial
-        sections = self.tutorial_sections.get(
-            where={"tutorial_id": tutorial_id}
-        )
+        # Parse the stored JSON
+        tutorial_data = json.loads(tutorial["documents"][0])
         
-        return {
-            "metadata": tutorial["metadatas"][0],
-            "sections": [
-                {
-                    "id": sections["ids"][i],
-                    "type": sections["metadatas"][i]["type"],
-                    "title": sections["metadatas"][i]["title"],
-                    "content": sections["documents"][i],
-                    "metadata": sections["metadatas"][i].get("metadata", {})
-                }
-                for i in range(len(sections["ids"]))
-            ]
-        }
+        # Convert ISO datetime string back to datetime object
+        if "metadata" in tutorial_data and "generated_date" in tutorial_data["metadata"]:
+            tutorial_data["metadata"]["generated_date"] = datetime.fromisoformat(
+                tutorial_data["metadata"]["generated_date"]
+            )
+        
+        # Deserialize metadata strings back to dictionaries
+        for section in tutorial_data["sections"]:
+            if isinstance(section["metadata"], str):
+                try:
+                    section["metadata"] = json.loads(section["metadata"])
+                except json.JSONDecodeError:
+                    section["metadata"] = {}
+        
+        return tutorial_data
 
     def get_collection(self, collection_name: str):
         """Get a collection by name"""
