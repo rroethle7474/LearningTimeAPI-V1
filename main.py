@@ -39,7 +39,7 @@ app.add_middleware(
 embedding_generator = EmbeddingGenerator()
 vector_store = VectorStore(
     persist_directory=settings.CHROMADB_PATH,
-    embedding_generator=embedding_generator  # Pass the embedding generator
+    embedding_generator=embedding_generator
 )
 
 # Initialize LLM client (prioritize OpenAI over Anthropic)

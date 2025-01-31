@@ -6,43 +6,26 @@ import uuid
 from generators.tutorial import TutorialGenerator, ProcessedTutorial
 from db.vector_store import VectorStore
 from embeddings.generator import EmbeddingGenerator
-from llm.factory import LLMFactory
-from config import settings
 from app_types.tutorial import TutorialSectionType
+# Import dependencies
+from dependencies import (
+    get_vector_store,
+    get_embedding_generator,
+    get_llm_client,
+    get_tutorial_generator
+)
 
 router = APIRouter(tags=["tutorials"])
 
-# Update the dependency injection functions
-def get_embedding_generator():
-    """Dependency to get embedding generator instance"""
-    from main import embedding_generator
-    return embedding_generator
-
-def get_vector_store(
-    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
-):
-    """Dependency to get vector store instance"""
-    return VectorStore(
-        embedding_generator=embedding_generator,
-        persist_directory="./chromadb"
-    )
-
-def get_llm_client():
-    """Dependency to get LLM client instance"""
-    from main import llm_client
-    return llm_client
-
-def get_tutorial_generator(
-    llm_client = Depends(get_llm_client),
-    vector_store: VectorStore = Depends(get_vector_store),
-    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
-):
-    """Dependency injection for TutorialGenerator"""
-    return TutorialGenerator(llm_client, vector_store, embedding_generator)
+# Remove all these local dependency definitions since we're importing them
+# def get_embedding_generator():...
+# def get_vector_store():...
+# def get_llm_client():...
+# def get_tutorial_generator():...
 
 class TutorialGenerationRequest(BaseModel):
     content_id: str
-    content_type: Literal["article", "youtube"]  # Add type validation
+    content_type: Literal["article", "youtube"]
 
 class TutorialGenerationResponse(BaseModel):
     tutorial_id: str
@@ -97,7 +80,7 @@ async def generate_tutorial_task(
 async def generate_tutorial(
     request: TutorialGenerationRequest,
     background_tasks: BackgroundTasks,
-    tutorial_generator: TutorialGenerator = Depends(get_tutorial_generator)
+    tutorial_generator: TutorialGenerator = Depends(get_tutorial_generator)  # Using imported dependency
 ):
     """Start tutorial generation"""
     task_id = str(uuid.uuid4())
@@ -232,7 +215,7 @@ async def list_tutorials(
 @router.get("/tutorials/{tutorial_id}", response_model=TutorialResponse)
 async def get_tutorial_detail(
     tutorial_id: str = Path(..., description="ID of the tutorial to retrieve"),
-    vector_store: VectorStore = Depends(get_vector_store)
+    vector_store: VectorStore = Depends(get_vector_store)  # Using imported dependency
 ):
     """Get complete tutorial with all sections"""
     try:

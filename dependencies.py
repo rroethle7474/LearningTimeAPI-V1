@@ -10,14 +10,10 @@ def get_embedding_generator():
     from main import embedding_generator
     return embedding_generator
 
-def get_vector_store(
-    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
-):
+def get_vector_store():
     """Dependency to get vector store instance"""
-    return VectorStore(
-        embedding_generator=embedding_generator,
-        persist_directory="./chromadb"
-    )
+    from main import vector_store  # Import the singleton instance
+    return vector_store
 
 def get_llm_client():
     """Dependency to get LLM client instance"""

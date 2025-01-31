@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Query, HTTPException, Depends, Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Annotated
 from pydantic import BaseModel
 from db.vector_store import VectorStore
 from embeddings.generator import EmbeddingGenerator
 from search.semantic_search import SemanticSearch
 from datetime import datetime
 from urllib.parse import unquote
+# Import dependencies
+from dependencies import get_vector_store, get_embedding_generator, get_semantic_search
 
 router = APIRouter()
 
@@ -49,27 +51,6 @@ class ContentDetailResponse(BaseModel):
     tutorial_id: Optional[str] = None  # Reference to generated tutorial if exists
     content_chunks: List[str]  # The actual content broken into chunks
     metadata: Dict[str, Any]  # Additional type-specific metadata
-
-def get_embedding_generator():
-    """Dependency to get embedding generator instance"""
-    from main import embedding_generator
-    return embedding_generator
-
-def get_vector_store(
-    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
-):
-    """Dependency to get vector store instance"""
-    return VectorStore(
-        embedding_generator=embedding_generator,
-        persist_directory="./chromadb"
-    )
-
-def get_semantic_search(
-    vector_store: VectorStore = Depends(get_vector_store),
-    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
-):
-    """Dependency to get semantic search instance"""
-    return SemanticSearch(vector_store, embedding_generator)
 
 @router.get("/single", response_model=SearchResponse)
 async def search_single_collection(
@@ -227,6 +208,76 @@ async def get_multiple_collections_contents(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/content/{collection_name}/by-url")
+async def get_content_by_url(
+    collection_name: Annotated[str, Path(...)],
+    source_url: Annotated[str, Query(...)],
+    vector_store: Annotated[VectorStore, Depends(get_vector_store)]
+):
+    """
+    Check if content exists by source URL in a specific collection.
+    Returns an object indicating existence and content_id (if found).
+    """
+    # Add function entry logging before ANY other code
+    import sys
+    print("\n=== FUNCTION ENTRY LOGGING ===", file=sys.stderr)
+    print(f"Python Version: {sys.version}", file=sys.stderr)
+    print(f"Collection Name Type: {type(collection_name)}", file=sys.stderr)
+    print(f"Source URL Type: {type(source_url)}", file=sys.stderr)
+    print(f"Vector Store Type: {type(vector_store)}", file=sys.stderr)
+    
+    print("\n=== ENDPOINT START ===")
+    print("Parameters received:")
+    print("Collection Name:", collection_name)
+    print("Source URL:", source_url)
+    
+    try:
+        # Single decode is sufficient when UI handles encoding properly
+        print("\n=== URL DECODING ===")
+        decoded_url = unquote(source_url)
+        print("Decoded URL:", decoded_url)
+        
+        try:
+            print("\n=== GETTING COLLECTION ===")
+            # Get collection
+            collection = vector_store.get_collection(collection_name)
+            print("Collection obtained successfully")
+            print("Collection Type:", type(collection))
+            
+            try:
+                print("\n=== EXECUTING QUERY ===")
+                results = collection.get(
+                    where={"source_url": decoded_url}
+                )
+                print("Query completed")
+                print("Results:", results)
+                
+                return {
+                    "exists": bool(results and results["ids"]),
+                    "content_id": results["ids"][0] if (results and results["ids"]) else None
+                }
+                
+            except Exception as query_error:
+                print("\n=== QUERY ERROR ===")
+                print("Error Type:", type(query_error))
+                print("Error Message:", str(query_error))
+                print("Error Details:", repr(query_error))
+                raise HTTPException(status_code=500, detail=f"Query error: {str(query_error)}")
+                
+        except Exception as collection_error:
+            print("\n=== COLLECTION ERROR ===")
+            print("Error Type:", type(collection_error))
+            print("Error Message:", str(collection_error))
+            print("Error Details:", repr(collection_error))
+            raise HTTPException(status_code=500, detail=f"Collection error: {str(collection_error)}")
+            
+    except Exception as e:
+        print("\n=== UNEXPECTED ERROR ===")
+        print("Error Type:", type(e))
+        print("Error Message:", str(e))
+        print("Error Details:", repr(e))
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
 @router.get("/content/{collection_name}/{content_id}", response_model=ContentDetailResponse)
 async def get_content_by_id(
     collection_name: str = Path(..., description="Name of the collection"),
@@ -238,6 +289,11 @@ async def get_content_by_id(
     Returns a normalized view of the content regardless of type.
     """
     try:
+        print("\n=== GETTING CONTENT BY ID ===")
+        print("Content ID:", content_id)
+        print("Collection Name:", collection_name)
+        print("Vector Store ID:", id(vector_store))
+        
         # Get content from vector store
         content = vector_store.get_content_by_id(content_id, collection_name)
         if not content:
@@ -298,40 +354,123 @@ async def delete_content(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/content/{collection_name}/by-url")
-async def get_content_by_url(
-    collection_name: str = Path(..., description="Name of the collection"),
-    source_url: str = Query(..., description="Source URL to search for"),
+@router.get("/debug/vector-store")
+async def debug_vector_store(
     vector_store: VectorStore = Depends(get_vector_store)
 ):
-    """
-    Check if content exists by source URL in a specific collection.
-    Returns 200 if found, 404 if not found.
-    """
+    """Debug endpoint to check vector store state"""
     try:
-        # Decode the URL to handle any URL encoding
-        decoded_url = unquote(source_url)
+        collections_info = {
+            "articles_content": {
+                "exists": hasattr(vector_store, "articles"),
+                "count": vector_store.articles.count() if hasattr(vector_store, "articles") else None,
+                "peek": vector_store.articles.peek() if hasattr(vector_store, "articles") else None
+            },
+            "youtube_content": {
+                "exists": hasattr(vector_store, "youtube"),
+                "count": vector_store.youtube.count() if hasattr(vector_store, "youtube") else None,
+                "peek": vector_store.youtube.peek() if hasattr(vector_store, "youtube") else None
+            },
+            "tutorials": {
+                "exists": hasattr(vector_store, "tutorials"),
+                "count": vector_store.tutorials.count() if hasattr(vector_store, "tutorials") else None,
+                "peek": vector_store.tutorials.peek() if hasattr(vector_store, "tutorials") else None
+            }
+        }
         
-        # Get collection
-        collection = vector_store.get_collection(collection_name)
+        return {
+            "vector_store_id": id(vector_store),
+            "collections": collections_info,
+            "client_type": type(vector_store.client).__name__
+        }
+    except Exception as e:
+        print("\n=== DEBUG ENDPOINT ERROR ===")
+        print("Error Type:", type(e))
+        print("Error Message:", str(e))
+        print("Error Details:", repr(e))
+        raise HTTPException(status_code=500, detail=f"Debug error: {str(e)}")
+
+@router.post("/debug/add-test-content")
+async def add_test_content(
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """Debug endpoint to add test content"""
+    try:
+        # Add test article
+        test_article = {
+            "id": "test_article_1",
+            "content": "This is a test article content",
+            "metadata": {
+                "title": "Test Article",
+                "author": "Test Author",
+                "source_url": "https://test.com/article1",
+                "content_type": "article"
+            }
+        }
         
-        # Query for content with matching source_url
-        results = collection.get(
-            where={"source_url": decoded_url}
+        # Generate a test embedding
+        embedding = vector_store.embedding_generator.generate(test_article["content"])
+        
+        # Add to articles collection
+        vector_store.articles.add(
+            ids=[test_article["id"]],
+            documents=[test_article["content"]],
+            embeddings=[embedding],
+            metadatas=[test_article["metadata"]]
         )
         
-        if not results or not results["ids"]:
-            # Try with the original encoded URL as fallback
-            results = collection.get(
-                where={"source_url": source_url}
-            )
-            
-        if not results or not results["ids"]:
-            raise HTTPException(status_code=404, detail="Content not found for given URL")
-
-        return {"exists": True, "content_id": results["ids"][0]}
+        return {
+            "message": "Test content added successfully",
+            "article_id": test_article["id"]
+        }
         
     except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=str(e))
+        print("\n=== TEST CONTENT ERROR ===")
+        print("Error Type:", type(e))
+        print("Error Message:", str(e))
+        print("Error Details:", repr(e))
+        raise HTTPException(status_code=500, detail=f"Error adding test content: {str(e)}")
+
+@router.get("/debug/vector-store-status")
+async def check_vector_store():
+    """Debug endpoint to check vector store initialization"""
+    try:
+        from main import vector_store
+        return {
+            "status": "initialized",
+            "id": id(vector_store),
+            "collections": {
+                "articles": hasattr(vector_store, "articles"),
+                "youtube": hasattr(vector_store, "youtube"),
+                "tutorials": hasattr(vector_store, "tutorials")
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error_type": str(type(e)),
+            "error_message": str(e)
+        }
+
+@router.get("/debug/url-test")
+async def test_url_handling(
+    test_url: Annotated[str, Query(...)],
+):
+    """Debug endpoint to test URL parameter handling"""
+    try:
+        print("\n=== URL TEST START ===")
+        print("Raw URL:", test_url)
+        decoded = unquote(test_url)
+        print("Decoded URL:", decoded)
+        return {
+            "raw_url": test_url,
+            "decoded_url": decoded
+        }
+    except Exception as e:
+        print("\n=== URL TEST ERROR ===")
+        print("Error Type:", type(e))
+        print("Error Message:", str(e))
+        return {
+            "error": str(e),
+            "error_type": str(type(e))
+        }

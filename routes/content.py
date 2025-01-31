@@ -13,6 +13,12 @@ import logging
 from datetime import datetime
 from llm.base import LLMClient
 from llm.factory import create_llm_client
+# Import dependencies
+from dependencies import (
+    get_vector_store,
+    get_embedding_generator,
+    get_llm_client
+)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -144,33 +150,13 @@ async def process_content_task(
             "summary": None  # Clear summary on error
         }
 
-# Add dependency for embedding generator
-def get_embedding_generator():
-    """Dependency to get embedding generator instance"""
-    from main import embedding_generator  # Import from main where it's initialized
-    return embedding_generator
-
-def get_vector_store(
-    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
-):
-    """Dependency to get vector store instance"""
-    return VectorStore(
-        embedding_generator=embedding_generator,
-        persist_directory="./chromadb"
-    )
-
-# Add this dependency
-def get_llm_client():
-    """Dependency to get LLM client instance"""
-    return create_llm_client("openai")  # or get from settings
-
 @router.post("/submit", response_model=TaskStatus)
 async def submit_content(
     submission: URLSubmission,
     background_tasks: BackgroundTasks,
     vector_store: VectorStore = Depends(get_vector_store),
     embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator),
-    llm_client: LLMClient = Depends(get_llm_client)  # Updated dependency
+    llm_client: LLMClient = Depends(get_llm_client)
 ):
     """Submit content for processing"""
     try:

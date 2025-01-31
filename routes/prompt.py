@@ -1,12 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from llm.factory import create_llm_client
 from services.context_generation_service import ContextGenerationService
 from search.semantic_search import SemanticSearch
 from db.vector_store import VectorStore
 from embeddings.generator import EmbeddingGenerator
 import logging
+# Import dependencies
+from dependencies import (
+    get_vector_store,
+    get_embedding_generator,
+    get_semantic_search,
+    get_llm_client
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["prompts"])
@@ -17,32 +23,6 @@ class ContextRequest(BaseModel):
 class ContextResponse(BaseModel):
     context: str
     error: Optional[str] = None
-
-def get_embedding_generator():
-    """Dependency to get embedding generator instance"""
-    from main import embedding_generator  # Import from main where it's initialized
-    return embedding_generator
-
-def get_vector_store(
-    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
-):
-    """Dependency to get vector store instance"""
-    return VectorStore(
-        embedding_generator=embedding_generator,
-        persist_directory="./chromadb"
-    )
-
-def get_semantic_search(
-    vector_store: VectorStore = Depends(get_vector_store),
-    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
-):
-    """Dependency to get semantic search instance"""
-    return SemanticSearch(vector_store, embedding_generator)
-
-def get_llm_client():
-    """Dependency to get LLM client instance"""
-    from main import llm_client  # Import from main where it's initialized
-    return llm_client
 
 def get_context_service(
     llm_client = Depends(get_llm_client),

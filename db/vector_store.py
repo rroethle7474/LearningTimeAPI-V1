@@ -12,20 +12,23 @@ logger = logging.getLogger(__name__)
 class VectorStore:
     def __init__(
         self, 
-        embedding_generator: EmbeddingGenerator,  # Make it required and typed
+        embedding_generator: EmbeddingGenerator,
         persist_directory: str = "./chromadb",
+        client_settings: Optional[Settings] = None
     ):
         """Initialize ChromaDB client and collections"""
-        self.client = chromadb.PersistentClient(
-            path=persist_directory,
-            settings=Settings(
-                allow_reset=True,
-                is_persistent=True
+        try:
+            # Use the new recommended configuration
+            self.client = chromadb.PersistentClient(
+                path=persist_directory
             )
-        )
-        # self.client = chromadb.Client()
-        self.embedding_generator = embedding_generator
-        self._init_collections()
+            
+            print(f"Initialized ChromaDB client: {type(self.client).__name__}")
+            self.embedding_generator = embedding_generator
+            self._init_collections()
+        except Exception as e:
+            print(f"ChromaDB initialization error: {str(e)}")
+            raise
     
     def _init_collections(self):
         """Initialize or get existing collections"""
@@ -111,14 +114,23 @@ class VectorStore:
 
     def get_collection(self, collection_name: str):
         """Get a collection by name"""
-        if collection_name == "article":
-            return self.articles
-        elif collection_name == "youtube":
-            return self.youtube
-        elif collection_name == "tutorial":
-            return self.tutorials
-        else:
-            raise ValueError(f"Unknown collection: {collection_name}")
+        # Map collection names to instance variables
+        collection_map = {
+            "articles_content": self.articles,
+            "youtube_content": self.youtube,
+            "tutorials": self.tutorials,
+            "tutorial_sections": self.tutorial_sections
+        }
+        
+        # First check the mapping
+        if collection_name in collection_map:
+            return collection_map[collection_name]
+        
+        # Try getting from client directly
+        try:
+            return self.client.get_collection(name=collection_name)
+        except Exception as e:
+            raise ValueError(f"Unknown collection: {collection_name}. Error: {str(e)}")
     
     def add_to_collection(
         self,
