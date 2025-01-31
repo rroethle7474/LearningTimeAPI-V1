@@ -16,11 +16,14 @@ class VectorStore:
         persist_directory: str = "./chromadb",
     ):
         """Initialize ChromaDB client and collections"""
-        # self.client = chromadb.Client(Settings(
-        #     chroma_db_impl="duckdb+parquet",
-        #     persist_directory=persist_directory
-        # ))
-        self.client = chromadb.Client()
+        self.client = chromadb.PersistentClient(
+            path=persist_directory,
+            settings=Settings(
+                allow_reset=True,
+                is_persistent=True
+            )
+        )
+        # self.client = chromadb.Client()
         self.embedding_generator = embedding_generator
         self._init_collections()
     
@@ -282,4 +285,62 @@ class VectorStore:
             "content_id": content_id,
             "documents": [results["documents"][i] for i in sorted_indices],
             "metadata": full_metadata
-        } 
+        }
+
+    def get_collection_contents(
+        self,
+        collection_name: str,
+        offset: int = 0,
+        limit: int = 50
+    ) -> Dict[str, Any]:
+        """
+        Get paginated contents of a collection
+        """
+        try:
+            collection = self.client.get_collection(collection_name)
+            
+            # Get total count
+            total = collection.count()
+            
+            # Get paginated results
+            results = collection.get(
+                limit=limit,
+                offset=offset
+            )
+            
+            items = []
+            for i in range(len(results["ids"])):
+                items.append({
+                    "id": results["ids"][i],
+                    "document": results["documents"][i] if "documents" in results else None,
+                    "metadata": results["metadatas"][i] if "metadatas" in results else {}
+                })
+                
+            return {
+                "total": total,
+                "items": items
+            }
+            
+        except Exception as e:
+            raise Exception(f"Error getting collection contents: {str(e)}")
+
+    def find_tutorial_for_content(self, content_id: str) -> Optional[Dict[str, Any]]:
+        """Find a tutorial generated from specific content"""
+        try:
+            # Search in tutorials collection for matching content_id
+            results = self.tutorials.get(
+                where={"source_content_id": content_id}
+            )
+            
+            if results and results["ids"]:
+                # Return first matching tutorial
+                return {
+                    "id": results["ids"][0],
+                    "metadata": results["metadatas"][0] if results["metadatas"] else {},
+                    "document": results["documents"][0] if results["documents"] else None
+                }
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding tutorial for content {content_id}: {str(e)}")
+            return None 

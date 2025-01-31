@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, status
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, status, Path, Query
 from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime
 from pydantic import BaseModel
@@ -151,6 +151,118 @@ async def get_tutorial_content(
             practice_exercises=[],  # Parse from stored data
             source_url=metadata["source_url"],
             content_type=metadata["content_type"]
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class TutorialSection(BaseModel):
+    section_id: str
+    tutorial_id: str
+    title: str
+    content: str
+    section_type: TutorialSectionType
+    order: int
+    metadata: Dict[str, Any]
+
+class TutorialResponse(BaseModel):
+    id: str
+    title: str
+    description: str
+    source_content_id: Optional[str]
+    source_type: Optional[str]  # "article" or "youtube"
+    source_url: Optional[str]
+    generated_date: datetime
+    sections: List[TutorialSection]
+    metadata: Dict[str, Any]
+
+class TutorialListItem(BaseModel):
+    id: str
+    title: str
+    description: str
+    generated_date: datetime
+    source_type: Optional[str]
+    section_count: int
+    metadata: Dict[str, Any]
+
+class TutorialListResponse(BaseModel):
+    total: int
+    items: List[TutorialListItem]
+
+@router.get("/tutorials", response_model=TutorialListResponse)
+async def list_tutorials(
+    offset: int = Query(0, description="Number of records to skip"),
+    limit: int = Query(50, description="Maximum number of records to return"),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """Get paginated list of tutorials"""
+    try:
+        contents = vector_store.get_collection_contents(
+            collection_name="tutorials",
+            offset=offset,
+            limit=limit
+        )
+        
+        items = []
+        for item in contents["items"]:
+            tutorial_data = item.get("document")
+            if isinstance(tutorial_data, str):
+                import json
+                tutorial_data = json.loads(tutorial_data)
+                
+            metadata = item.get("metadata", {})
+            items.append(TutorialListItem(
+                id=item["id"],
+                title=tutorial_data.get("title", "Untitled"),
+                description=tutorial_data.get("description", ""),
+                generated_date=datetime.fromisoformat(tutorial_data["metadata"]["generated_date"]),
+                source_type=tutorial_data.get("source_type"),
+                section_count=len(tutorial_data.get("sections", [])),
+                metadata=metadata
+            ))
+            
+        return TutorialListResponse(
+            total=contents["total"],
+            items=items
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/tutorials/{tutorial_id}", response_model=TutorialResponse)
+async def get_tutorial_detail(
+    tutorial_id: str = Path(..., description="ID of the tutorial to retrieve"),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """Get complete tutorial with all sections"""
+    try:
+        tutorial_data = vector_store.get_tutorial_with_sections(tutorial_id)
+        if not tutorial_data:
+            raise HTTPException(status_code=404, detail="Tutorial not found")
+            
+        # Convert the tutorial data into our response model
+        sections = []
+        for section in tutorial_data["sections"]:
+            sections.append(TutorialSection(
+                section_id=section["id"],
+                tutorial_id=tutorial_id,
+                title=section["title"],
+                content=section["content"],
+                section_type=section["type"],
+                order=section["order"],
+                metadata=section["metadata"]
+            ))
+            
+        return TutorialResponse(
+            id=tutorial_id,
+            title=tutorial_data["title"],
+            description=tutorial_data["description"],
+            source_content_id=tutorial_data.get("source_content_id"),
+            source_type=tutorial_data.get("source_type"),
+            source_url=tutorial_data.get("source_url"),
+            generated_date=tutorial_data["metadata"]["generated_date"],
+            sections=sorted(sections, key=lambda x: x.order),
+            metadata=tutorial_data["metadata"]
         )
         
     except Exception as e:

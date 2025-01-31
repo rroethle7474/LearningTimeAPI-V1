@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Query, HTTPException, Depends
+from fastapi import APIRouter, Query, HTTPException, Depends, Path
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from db.vector_store import VectorStore
 from embeddings.generator import EmbeddingGenerator
 from search.semantic_search import SemanticSearch
+from datetime import datetime
 
 router = APIRouter()
 
@@ -20,6 +21,33 @@ class SearchResponse(BaseModel):
 class MultiCollectionSearchResponse(BaseModel):
     query: str
     collections: Dict[str, List[SearchResult]]
+
+class ContentListItem(BaseModel):
+    id: str
+    title: str
+    type: str
+    source: str
+    metadata: Dict[str, Any]
+
+class ContentListResponse(BaseModel):
+    total: int
+    items: List[ContentListItem]
+
+class MultiCollectionContentResponse(BaseModel):
+    collections: Dict[str, ContentListResponse]
+
+class ContentDetailResponse(BaseModel):
+    id: str
+    title: str
+    content_type: str
+    author: str
+    source_url: str
+    summary: Optional[str]
+    published_date: Optional[str]
+    processed_date: str
+    tutorial_id: Optional[str] = None  # Reference to generated tutorial if exists
+    content_chunks: List[str]  # The actual content broken into chunks
+    metadata: Dict[str, Any]  # Additional type-specific metadata
 
 def get_embedding_generator():
     """Dependency to get embedding generator instance"""
@@ -114,6 +142,157 @@ async def find_similar_content(
             "content_id": content_id,
             "similar_items": filtered_results
         }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/collection/{collection_name}/contents", response_model=ContentListResponse)
+async def get_collection_contents(
+    collection_name: str = Path(..., description="Name of the collection to fetch"),
+    offset: int = Query(0, description="Number of records to skip"),
+    limit: int = Query(50, description="Maximum number of records to return"),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """Get paginated contents of a single collection"""
+    try:
+        # Get collection contents
+        contents = vector_store.get_collection_contents(
+            collection_name=collection_name,
+            offset=offset,
+            limit=limit
+        )
+        
+        # Format response
+        items = []
+        for item in contents["items"]:
+            metadata = item.get("metadata", {})
+            items.append(ContentListItem(
+                id=item["id"],
+                title=metadata.get("title", "Untitled"),
+                type=metadata.get("content_type", "unknown"),
+                source=metadata.get("source_url", ""),
+                metadata=metadata
+            ))
+            
+        return ContentListResponse(
+            total=contents["total"],
+            items=items
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/collections/contents", response_model=MultiCollectionContentResponse)
+async def get_multiple_collections_contents(
+    collections: List[str] = Query(
+        ..., 
+        description="Comma-separated list of collections to fetch (e.g. articles_content,youtube_content)",
+        example="articles_content,youtube_content"
+    ),
+    offset: int = Query(0, description="Number of records to skip"),
+    limit: int = Query(50, description="Maximum number of records per collection"),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """Get paginated contents from multiple collections"""
+    try:
+        result = {"collections": {}}
+        
+        for collection_name in collections:
+            contents = vector_store.get_collection_contents(
+                collection_name=collection_name,
+                offset=offset,
+                limit=limit
+            )
+            
+            # Format items for this collection
+            items = []
+            for item in contents["items"]:
+                metadata = item.get("metadata", {})
+                items.append(ContentListItem(
+                    id=item["id"],
+                    title=metadata.get("title", "Untitled"),
+                    type=metadata.get("content_type", "unknown"),
+                    source=metadata.get("source_url", ""),
+                    metadata=metadata
+                ))
+                
+            result["collections"][collection_name] = ContentListResponse(
+                total=contents["total"],
+                items=items
+            )
+            
+        return MultiCollectionContentResponse(**result)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/content/{collection_name}/{content_id}", response_model=ContentDetailResponse)
+async def get_content_by_id(
+    collection_name: str = Path(..., description="Name of the collection"),
+    content_id: str = Path(..., description="ID of the content to retrieve"),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """
+    Get content details by ID from a specific collection.
+    Returns a normalized view of the content regardless of type.
+    """
+    try:
+        # Get content from vector store
+        content = vector_store.get_content_by_id(content_id, collection_name)
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        # Get base metadata
+        metadata = content["metadata"]
+        
+        # Check if there's an associated tutorial
+        tutorial_id = None
+        if collection_name in ["articles_content", "youtube_content"]:
+            # You might need to implement this method in vector_store
+            tutorial = vector_store.find_tutorial_for_content(content_id)
+            if tutorial:
+                tutorial_id = tutorial["id"]
+
+        # Normalize the response
+        response = ContentDetailResponse(
+            id=content_id,
+            title=metadata.get("title", "Untitled"),
+            content_type=metadata.get("content_type", "unknown"),
+            author=metadata.get("author", "Unknown"),
+            source_url=metadata.get("source_url", ""),
+            summary=metadata.get("summary"),
+            published_date=metadata.get("published_date"),
+            processed_date=metadata.get("processed_date", datetime.utcnow().isoformat()),
+            tutorial_id=tutorial_id,
+            content_chunks=content["documents"],
+            metadata=metadata  # Include all metadata for type-specific UI enhancements
+        )
+        
+        return response
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/content/{collection_name}/{content_id}", status_code=204)
+async def delete_content(
+    collection_name: str = Path(..., description="Name of the collection"),
+    content_id: str = Path(..., description="ID of the content to delete"),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """
+    Delete content from a collection by ID.
+    Returns 204 on success with no content.
+    """
+    try:
+        # Get content first to verify it exists
+        content = vector_store.get_content_by_id(content_id, collection_name)
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+            
+        # Delete the content
+        vector_store.delete_from_collection(collection_name, [content_id])
+        
+        return None  # 204 No Content
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
