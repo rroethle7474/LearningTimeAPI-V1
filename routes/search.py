@@ -5,6 +5,7 @@ from db.vector_store import VectorStore
 from embeddings.generator import EmbeddingGenerator
 from search.semantic_search import SemanticSearch
 from datetime import datetime
+from urllib.parse import unquote
 
 router = APIRouter()
 
@@ -295,4 +296,42 @@ async def delete_content(
         return None  # 204 No Content
         
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/content/{collection_name}/by-url")
+async def get_content_by_url(
+    collection_name: str = Path(..., description="Name of the collection"),
+    source_url: str = Query(..., description="Source URL to search for"),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """
+    Check if content exists by source URL in a specific collection.
+    Returns 200 if found, 404 if not found.
+    """
+    try:
+        # Decode the URL to handle any URL encoding
+        decoded_url = unquote(source_url)
+        
+        # Get collection
+        collection = vector_store.get_collection(collection_name)
+        
+        # Query for content with matching source_url
+        results = collection.get(
+            where={"source_url": decoded_url}
+        )
+        
+        if not results or not results["ids"]:
+            # Try with the original encoded URL as fallback
+            results = collection.get(
+                where={"source_url": source_url}
+            )
+            
+        if not results or not results["ids"]:
+            raise HTTPException(status_code=404, detail="Content not found for given URL")
+
+        return {"exists": True, "content_id": results["ids"][0]}
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=500, detail=str(e))
