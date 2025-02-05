@@ -8,8 +8,12 @@ from datetime import datetime
 from urllib.parse import unquote
 # Import dependencies
 from dependencies import get_vector_store, get_embedding_generator, get_semantic_search
+from utils.duration import format_duration  # Add this import at the top
 
 router = APIRouter()
+
+# Add this as a constant at the top of the file with other imports
+MINIMUM_SIMILARITY_THRESHOLD = 0.01  # This means results must be at least 1% similar
 
 class SearchResult(BaseModel):
     id: str  # Change from single string to handle the first ID
@@ -52,11 +56,45 @@ class ContentDetailResponse(BaseModel):
     content_chunks: List[str]  # The actual content broken into chunks
     metadata: Dict[str, Any]  # Additional type-specific metadata
 
+def normalize_distance_score(distances: List[float]) -> float:
+    """
+    Convert an array of distance values into a single normalized score.
+    Returns a value between 0 and 1, where 1 is the best match.
+    """
+    if not distances or not isinstance(distances, list):
+        return None
+        
+    # Take the average distance if there are multiple values
+    avg_distance = sum(distances) / len(distances)
+    
+    # Convert cosine distance (0-2 range) to similarity score (0-1 range)
+    # where 1 is most similar and 0 is least similar
+    similarity_score = (2 - avg_distance) / 2
+    
+    # Ensure the score stays within bounds
+    return max(0, min(1, similarity_score))
+
+def format_search_result(result: Dict[str, Any]) -> SearchResult:
+    """Format a search result, including duration formatting"""
+    metadata = result["metadata"][0]
+    
+    # Format duration if it exists and is a YouTube video
+    if metadata.get("content_type") == "youtube" and "duration" in metadata:
+        metadata = {**metadata, "duration": format_duration(metadata["duration"])}
+    
+    return SearchResult(
+        id=result["id"][0],
+        content=result["content"][0],
+        metadata=metadata,
+        distance=normalize_distance_score(result.get("distance"))
+    )
+
 @router.get("/single", response_model=SearchResponse)
 async def search_single_collection(
     query: str,
     collection: str,
     limit: int = 5,
+    min_similarity: float = Query(default=MINIMUM_SIMILARITY_THRESHOLD, ge=0.0, le=1.0, description="Minimum similarity threshold (0-1). Higher values return more relevant results."),
     semantic_search: SemanticSearch = Depends(get_semantic_search)
 ):
     """Search within a single collection"""
@@ -68,20 +106,18 @@ async def search_single_collection(
             collection=collection,
             limit=limit
         )
+        print("RESULTS", results)
         # Transform the results to match the SearchResult model
         processed_results = []
         for result in results["results"]:
-            processed_results.append(SearchResult(
-                id=result["id"][0],  # Take first ID
-                content=result["content"][0],  # Take first content
-                metadata=result["metadata"][0],  # Take first metadata
-                distance=result["distance"][0] if result.get("distance") else None  # Take first distance if exists
-            ))
-            
+            formatted_result = format_search_result(result)
+            if formatted_result.distance >= min_similarity:
+                processed_results.append(formatted_result)
+        print("PROCESSED RESULTS", processed_results)
         return SearchResponse(query=query, results=processed_results)
         
     except Exception as e:
-        print("Error processing search results:", str(e))  # Add this for debugging
+        print("Error processing search results:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/multi", response_model=SearchResponse)
@@ -89,6 +125,7 @@ async def search_multiple_collections(
     query: str,
     collections: List[str] = Query(...),
     limit_per_collection: int = 3,
+    min_similarity: float = Query(default=MINIMUM_SIMILARITY_THRESHOLD, ge=0.0, le=1.0, description="Minimum similarity threshold (0-1). Higher values return more relevant results."),
     semantic_search: SemanticSearch = Depends(get_semantic_search)
 ):
     """Search across multiple collections"""
@@ -112,12 +149,9 @@ async def search_multiple_collections(
         processed_results = []
         for collection_results in results["collections"].values():
             for result in collection_results:
-                processed_results.append(SearchResult(
-                    id=result["id"][0],  # Take first ID
-                    content=result["content"][0],  # Take first content
-                    metadata=result["metadata"][0],  # Take first metadata
-                    distance=result["distance"][0] if result.get("distance") else None  # Take first distance if exists
-                ))
+                formatted_result = format_search_result(result)
+                if formatted_result.distance >= min_similarity:
+                    processed_results.append(formatted_result)
             
         return SearchResponse(query=query, results=processed_results)
         
@@ -241,7 +275,7 @@ async def get_multiple_collections_contents(
             for item in contents["items"]:
                 metadata = item.get("metadata", {})
                 content_id = metadata.get("content_id")
-                
+                metadata["duration"] = format_duration(metadata.get("duration"))
                 # Only process items that are the first chunk and haven't been seen
                 if content_id and metadata.get("chunk_index") == 0 and content_id not in seen_content_ids:
                     seen_content_ids.add(content_id)
@@ -294,15 +328,12 @@ async def get_content_by_url(
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 @router.get("/content/{collection_name}/{content_id}", response_model=ContentDetailResponse)
-async def get_content_by_id(
-    collection_name: str = Path(..., description="Name of the collection"),
-    content_id: str = Path(..., description="ID of the content to retrieve"),
+async def get_content_detail(
+    collection_name: str,
+    content_id: str,
     vector_store: VectorStore = Depends(get_vector_store)
 ):
-    """
-    Get content details by ID from a specific collection.
-    Returns a normalized view of the content regardless of type.
-    """
+    """Get detailed content information"""
     try:
         print("\n=== GETTING CONTENT BY ID ===")
         print("Content ID:", content_id)
@@ -316,6 +347,10 @@ async def get_content_by_id(
 
         # Get base metadata
         metadata = content["metadata"]
+      
+        # Format duration if it's a YouTube video
+        if metadata.get("content_type") == "youtube" and "duration" in metadata:
+            metadata = {**metadata, "duration": format_duration(metadata["duration"])}
         
         # Check if there's an associated tutorial
         tutorial_id = None

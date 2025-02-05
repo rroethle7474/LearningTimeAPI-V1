@@ -265,4 +265,41 @@ async def get_tutorial_detail(
         
     except Exception as e:
         print(f"Error in get_tutorial_detail: {str(e)}")  # Add debug logging
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/tutorials/{tutorial_id}", status_code=204)
+async def delete_tutorial(
+    tutorial_id: str = Path(..., description="ID of the tutorial to delete"),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """
+    Delete a tutorial and its sections.
+    Returns 204 on success with no content.
+    """
+    try:
+        # First verify the tutorial exists
+        tutorial = vector_store.get_tutorial_with_sections(tutorial_id)
+        if not tutorial:
+            raise HTTPException(status_code=404, detail="Tutorial not found")
+            
+        print(f"Deleting tutorial {tutorial_id} with title: {tutorial['metadata'].get('title', 'Unknown')}")
+        
+        # Delete the tutorial from tutorials collection
+        vector_store.tutorials.delete(
+            ids=[tutorial_id]
+        )
+        
+        # Delete all associated sections
+        section_ids = [section["id"] for section in tutorial["sections"]]
+        if section_ids:
+            print(f"Deleting {len(section_ids)} sections for tutorial {tutorial_id}")
+            vector_store.tutorial_sections.delete(
+                ids=section_ids
+            )
+        
+        print(f"Successfully deleted tutorial {tutorial_id} and its sections")
+        return None  # 204 No Content
+        
+    except Exception as e:
+        print(f"Error deleting tutorial: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e)) 

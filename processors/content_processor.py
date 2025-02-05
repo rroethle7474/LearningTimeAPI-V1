@@ -189,6 +189,39 @@ class ContentProcessor:
             raise ProcessingError(f"Error processing article: {str(e)}")
         finally:
             await page.close()
+    
+    def _format_duration(self, duration: str) -> str:
+        """Convert ISO 8601 duration to readable format"""
+        if not duration:
+            return ""
+        
+        # Remove 'PT' prefix
+        duration = duration[2:]
+        
+        # Initialize variables
+        hours = 0
+        minutes = 0
+        seconds = 0
+        
+        # Find hours
+        if 'H' in duration:
+            hours, duration = duration.split('H')
+            hours = int(hours)
+        
+        # Find minutes
+        if 'M' in duration:
+            minutes, duration = duration.split('M')
+            minutes = int(minutes)
+        
+        # Find seconds
+        if 'S' in duration:
+            seconds = int(duration.rstrip('S'))
+        
+        # Format the output
+        if hours > 0:
+            return f"{hours}:{minutes:02d}:{seconds:02d}"
+        else:
+            return f"{minutes}:{seconds:02d}"
 
     async def process_youtube(self, url: str) -> Tuple[ContentMetadata, List[str]]:
         """Process YouTube video content"""
@@ -212,7 +245,7 @@ class ContentProcessor:
                 author=video_data['snippet']['channelTitle'],
                 source_url=str(url),
                 content_type="youtube",
-                duration=video_data['contentDetails']['duration'],
+                duration=self._format_duration(video_data['contentDetails']['duration']),
                 published_date=video_data['snippet']['publishedAt'],
                 view_count=int(video_data['statistics'].get('viewCount', 0))
             )

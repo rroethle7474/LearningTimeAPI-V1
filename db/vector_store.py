@@ -365,3 +365,27 @@ class VectorStore:
         except Exception as e:
             logger.error(f"Error finding tutorial for content {content_id}: {str(e)}")
             return None 
+
+    def delete_tutorial(self, tutorial_id: str) -> None:
+        """Delete a tutorial and all its sections"""
+        try:
+            # Get the tutorial first to verify it exists and get section IDs
+            tutorial = self.get_tutorial_with_sections(tutorial_id)
+            if not tutorial:
+                raise ValueError(f"Tutorial not found: {tutorial_id}")
+            
+            # Delete the tutorial
+            self.tutorials.delete(
+                ids=[tutorial_id]
+            )
+            
+            # Delete all sections
+            section_ids = [section["id"] for section in tutorial["sections"]]
+            if section_ids:
+                self.tutorial_sections.delete(
+                    ids=section_ids
+                )
+            
+        except Exception as e:
+            logger.error(f"Error deleting tutorial {tutorial_id}: {str(e)}")
+            raise 

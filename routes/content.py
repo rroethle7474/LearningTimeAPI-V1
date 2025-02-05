@@ -13,6 +13,7 @@ import logging
 from datetime import datetime
 from llm.base import LLMClient
 from llm.factory import create_llm_client
+from utils.duration import format_duration  # Add this import at the top
 # Import dependencies
 from dependencies import (
     get_vector_store,
@@ -119,7 +120,7 @@ async def process_content_task(
                     "author": metadata.author or "Unknown",
                     "source_url": str(metadata.source_url),
                     "content_type": metadata.content_type,
-                    "duration": metadata.duration or "",
+                    "duration": format_duration(metadata.duration) or "",
                     "published_date": metadata.published_date or "",
                     "view_count": metadata.view_count or 0,
                     "summary": metadata.summary,
