@@ -72,13 +72,17 @@ class ContentProcessor:
     def extract_video_id(self, url: str) -> str:
         """Extract YouTube video ID from URL"""
         # Handle different YouTube URL formats
+        print(f"Extracting video ID from URL: {url}")
         parsed_url = urlparse(url)
         if parsed_url.hostname in ('youtu.be', 'www.youtu.be'):
+            print(f"Extracted video ID: {parsed_url.path[1:]}")
             return parsed_url.path[1:]
         if parsed_url.hostname in ('youtube.com', 'www.youtube.com'):
             if parsed_url.path == '/watch':
+                print(f"Extracted video ID: {parse_qs(parsed_url.query)['v'][0]}")
                 return parse_qs(parsed_url.query)['v'][0]
             if parsed_url.path.startswith(('/embed/', '/v/')):
+                print(f"Extracted video ID: {parsed_url.path.split('/')[2]}")
                 return parsed_url.path.split('/')[2]
         raise ValueError("Invalid YouTube URL")
 

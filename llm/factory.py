@@ -24,7 +24,7 @@ class LLMFactory:
         if provider.lower() == "openai":
             return OpenAIClient(
                 api_key=api_key,
-                model=model or "gpt-4",
+                model=model or "gpt-3.5-turbo",
                 **kwargs
             )
         elif provider.lower() == "anthropic":
@@ -43,7 +43,7 @@ def create_llm_client(
     if provider == "openai":
         return OpenAIClient(
             api_key=settings.OPENAI_API_KEY,
-            model="gpt-3.5-turbo"  # or "gpt-4" if you prefer
+            model="gpt-3.5-turbo-0125"
         )
     elif provider == "anthropic":
         return AnthropicClient(

@@ -12,10 +12,10 @@ from dependencies import get_vector_store, get_embedding_generator, get_semantic
 router = APIRouter()
 
 class SearchResult(BaseModel):
-    id: str
-    content: str
-    metadata: Dict[str, Any]
-    distance: Optional[float] = None
+    id: str  # Change from single string to handle the first ID
+    content: str  # Take first content
+    metadata: Dict[str, Any]  # Take first metadata
+    distance: Optional[float] = None  # Take first distance
 
 class SearchResponse(BaseModel):
     query: str
@@ -60,18 +60,31 @@ async def search_single_collection(
     semantic_search: SemanticSearch = Depends(get_semantic_search)
 ):
     """Search within a single collection"""
+    print("SEARCHING SINGLE COLLECTION", query)
+    print("COLLECTION", collection)
     try:
         results = await semantic_search.search(
             query=query,
             collection=collection,
             limit=limit
         )
-        return SearchResponse(query=query, results=results["results"])
+        # Transform the results to match the SearchResult model
+        processed_results = []
+        for result in results["results"]:
+            processed_results.append(SearchResult(
+                id=result["id"][0],  # Take first ID
+                content=result["content"][0],  # Take first content
+                metadata=result["metadata"][0],  # Take first metadata
+                distance=result["distance"][0] if result.get("distance") else None  # Take first distance if exists
+            ))
+            
+        return SearchResponse(query=query, results=processed_results)
         
     except Exception as e:
+        print("Error processing search results:", str(e))  # Add this for debugging
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/multi", response_model=MultiCollectionSearchResponse)
+@router.get("/multi", response_model=SearchResponse)
 async def search_multiple_collections(
     query: str,
     collections: List[str] = Query(...),
@@ -80,17 +93,36 @@ async def search_multiple_collections(
 ):
     """Search across multiple collections"""
     try:
-        results = await semantic_search.search_multi(
+        # Split any collections that contain commas and flatten the list
+        expanded_collections = []
+        for collection in collections:
+            expanded_collections.extend(collection.split(','))
+        
+        # Clean up the collection names
+        cleaned_collections = [c.strip() for c in expanded_collections]
+        
+        print("Processing collections:", cleaned_collections)
+        results = await semantic_search.multi_collection_search(
             query=query,
-            collections=collections,
+            collections=cleaned_collections,
             limit_per_collection=limit_per_collection
         )
-        return MultiCollectionSearchResponse(
-            query=query,
-            collections=results["collections"]
-        )
+        
+        # Combine and process all results
+        processed_results = []
+        for collection_results in results["collections"].values():
+            for result in collection_results:
+                processed_results.append(SearchResult(
+                    id=result["id"][0],  # Take first ID
+                    content=result["content"][0],  # Take first content
+                    metadata=result["metadata"][0],  # Take first metadata
+                    distance=result["distance"][0] if result.get("distance") else None  # Take first distance if exists
+                ))
+            
+        return SearchResponse(query=query, results=processed_results)
         
     except Exception as e:
+        print("Error processing multi-collection search results:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/similar/{content_id}")
@@ -144,20 +176,29 @@ async def get_collection_contents(
             limit=limit
         )
         
-        # Format response
+        # Track seen content_ids to avoid duplicates
+        seen_content_ids = set()
         items = []
+        
         for item in contents["items"]:
             metadata = item.get("metadata", {})
-            items.append(ContentListItem(
-                id=item["id"],
-                title=metadata.get("title", "Untitled"),
-                type=metadata.get("content_type", "unknown"),
-                source=metadata.get("source_url", ""),
-                metadata=metadata
-            ))
+            # Get the base content_id (remove chunk suffix if present)
+            item_id = item["id"].split('_')[0] if item["id"] else None
+            content_id = metadata.get("content_id", item_id)
+            
+            # Only process items that haven't been seen before
+            if content_id and content_id not in seen_content_ids:
+                seen_content_ids.add(content_id)
+                items.append(ContentListItem(
+                    id=content_id,
+                    title=metadata.get("title", "Untitled"),
+                    type=metadata.get("content_type", "unknown"),
+                    source=metadata.get("source_url", ""),
+                    metadata=metadata
+                ))
             
         return ContentListResponse(
-            total=contents["total"],
+            total=len(items),
             items=items
         )
         
@@ -168,8 +209,8 @@ async def get_collection_contents(
 async def get_multiple_collections_contents(
     collections: List[str] = Query(
         ..., 
-        description="Comma-separated list of collections to fetch (e.g. articles_content,youtube_content)",
-        example="articles_content,youtube_content"
+        description="List of collections to fetch",
+        example=["articles_content", "youtube_content"]
     ),
     offset: int = Query(0, description="Number of records to skip"),
     limit: int = Query(50, description="Maximum number of records per collection"),
@@ -179,7 +220,16 @@ async def get_multiple_collections_contents(
     try:
         result = {"collections": {}}
         
+        # Split any items that might contain commas
+        expanded_collections = []
+        for collection in collections:
+            expanded_collections.extend(collection.split(','))
+        
+        # Remove any whitespace and convert to lowercase
+        collections = [c.strip().lower() for c in expanded_collections]
+        
         for collection_name in collections:
+            seen_content_ids = set()
             contents = vector_store.get_collection_contents(
                 collection_name=collection_name,
                 offset=offset,
@@ -190,22 +240,28 @@ async def get_multiple_collections_contents(
             items = []
             for item in contents["items"]:
                 metadata = item.get("metadata", {})
-                items.append(ContentListItem(
-                    id=item["id"],
-                    title=metadata.get("title", "Untitled"),
-                    type=metadata.get("content_type", "unknown"),
-                    source=metadata.get("source_url", ""),
-                    metadata=metadata
-                ))
+                content_id = metadata.get("content_id")
+                
+                # Only process items that are the first chunk and haven't been seen
+                if content_id and metadata.get("chunk_index") == 0 and content_id not in seen_content_ids:
+                    seen_content_ids.add(content_id)
+                    items.append(ContentListItem(
+                        id=content_id,
+                        title=metadata.get("title", "Untitled"),
+                        type=metadata.get("content_type", "unknown"),
+                        source=metadata.get("source_url", ""),
+                        metadata=metadata
+                    ))
                 
             result["collections"][collection_name] = ContentListResponse(
-                total=contents["total"],
+                total=len(items),
                 items=items
             )
             
         return MultiCollectionContentResponse(**result)
         
     except Exception as e:
+        print("ERROR:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/content/{collection_name}/by-url")
@@ -218,64 +274,23 @@ async def get_content_by_url(
     Check if content exists by source URL in a specific collection.
     Returns an object indicating existence and content_id (if found).
     """
-    # Add function entry logging before ANY other code
-    import sys
-    print("\n=== FUNCTION ENTRY LOGGING ===", file=sys.stderr)
-    print(f"Python Version: {sys.version}", file=sys.stderr)
-    print(f"Collection Name Type: {type(collection_name)}", file=sys.stderr)
-    print(f"Source URL Type: {type(source_url)}", file=sys.stderr)
-    print(f"Vector Store Type: {type(vector_store)}", file=sys.stderr)
-    
-    print("\n=== ENDPOINT START ===")
-    print("Parameters received:")
-    print("Collection Name:", collection_name)
-    print("Source URL:", source_url)
-    
     try:
-        # Single decode is sufficient when UI handles encoding properly
-        print("\n=== URL DECODING ===")
         decoded_url = unquote(source_url)
-        print("Decoded URL:", decoded_url)
+        collection = vector_store.get_collection(collection_name)
         
-        try:
-            print("\n=== GETTING COLLECTION ===")
-            # Get collection
-            collection = vector_store.get_collection(collection_name)
-            print("Collection obtained successfully")
-            print("Collection Type:", type(collection))
-            
-            try:
-                print("\n=== EXECUTING QUERY ===")
-                results = collection.get(
-                    where={"source_url": decoded_url}
-                )
-                print("Query completed")
-                print("Results:", results)
-                
-                return {
-                    "exists": bool(results and results["ids"]),
-                    "content_id": results["ids"][0] if (results and results["ids"]) else None
-                }
-                
-            except Exception as query_error:
-                print("\n=== QUERY ERROR ===")
-                print("Error Type:", type(query_error))
-                print("Error Message:", str(query_error))
-                print("Error Details:", repr(query_error))
-                raise HTTPException(status_code=500, detail=f"Query error: {str(query_error)}")
-                
-        except Exception as collection_error:
-            print("\n=== COLLECTION ERROR ===")
-            print("Error Type:", type(collection_error))
-            print("Error Message:", str(collection_error))
-            print("Error Details:", repr(collection_error))
-            raise HTTPException(status_code=500, detail=f"Collection error: {str(collection_error)}")
-            
+        results = collection.get(
+            where={"source_url": decoded_url}
+        )
+        
+        # Extract the base content_id from the chunk id (remove _0 suffix if present)
+        content_id = results["ids"][0].split('_')[0] if (results and results["ids"]) else None
+        
+        return {
+            "exists": bool(results and results["ids"]),
+            "content_id": content_id
+        }
+        
     except Exception as e:
-        print("\n=== UNEXPECTED ERROR ===")
-        print("Error Type:", type(e))
-        print("Error Message:", str(e))
-        print("Error Details:", repr(e))
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 @router.get("/content/{collection_name}/{content_id}", response_model=ContentDetailResponse)
@@ -341,17 +356,23 @@ async def delete_content(
     Returns 204 on success with no content.
     """
     try:
+        # Remove chunk suffix if present (e.g. "abc_0" -> "abc")
+        base_content_id = content_id.split('_')[0]
+        print("BASE CONTENT ID", base_content_id)
+        print("COLLECTION NAME", collection_name)
         # Get content first to verify it exists
-        content = vector_store.get_content_by_id(content_id, collection_name)
+        content = vector_store.get_content_by_id(base_content_id, collection_name)
         if not content:
             raise HTTPException(status_code=404, detail="Content not found")
             
-        # Delete the content
-        vector_store.delete_from_collection(collection_name, [content_id])
+        # Delete all chunks for this content
+        collection = vector_store.get_collection(collection_name)
+        collection.delete(where={"content_id": base_content_id})
         
         return None  # 204 No Content
         
     except Exception as e:
+        print(f"Error deleting content: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/debug/vector-store")

@@ -192,61 +192,77 @@ async def list_tutorials(
             if isinstance(tutorial_data, str):
                 import json
                 tutorial_data = json.loads(tutorial_data)
-                
-            metadata = item.get("metadata", {})
+            
+            # Get metadata from the tutorial_data
+            tutorial_metadata = tutorial_data.get("metadata", {})
+            
+            # Get the first section's content as description (usually the summary)
+            description = ""
+            sections = tutorial_data.get("sections", [])
+            if sections and sections[0]["type"] == "summary":
+                description = sections[0]["content"]
+            
             items.append(TutorialListItem(
                 id=item["id"],
-                title=tutorial_data.get("title", "Untitled"),
-                description=tutorial_data.get("description", ""),
-                generated_date=datetime.fromisoformat(tutorial_data["metadata"]["generated_date"]),
-                source_type=tutorial_data.get("source_type"),
-                section_count=len(tutorial_data.get("sections", [])),
-                metadata=metadata
+                title=tutorial_metadata.get("title", "Untitled"),  # Title is in metadata
+                description=description,  # Use summary section as description
+                generated_date=datetime.fromisoformat(tutorial_metadata["generated_date"]),
+                source_type=tutorial_metadata.get("content_type"),  # content_type is in metadata
+                section_count=len(sections),
+                metadata=item.get("metadata", {})
             ))
             
-        return TutorialListResponse(
+        tutorial_list_response = TutorialListResponse(
             total=contents["total"],
             items=items
         )
         
+        return tutorial_list_response
+        
     except Exception as e:
+        print(f"Error in list_tutorials: {str(e)}")  # Add debug logging
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/tutorials/{tutorial_id}", response_model=TutorialResponse)
 async def get_tutorial_detail(
     tutorial_id: str = Path(..., description="ID of the tutorial to retrieve"),
-    vector_store: VectorStore = Depends(get_vector_store)  # Using imported dependency
+    vector_store: VectorStore = Depends(get_vector_store)
 ):
     """Get complete tutorial with all sections"""
     try:
         tutorial_data = vector_store.get_tutorial_with_sections(tutorial_id)
         if not tutorial_data:
             raise HTTPException(status_code=404, detail="Tutorial not found")
-            
+        print("TUTORIAL DATA", tutorial_data)
+        
         # Convert the tutorial data into our response model
         sections = []
-        for section in tutorial_data["sections"]:
+        for i, section in enumerate(tutorial_data["sections"]):
             sections.append(TutorialSection(
                 section_id=section["id"],
                 tutorial_id=tutorial_id,
                 title=section["title"],
                 content=section["content"],
                 section_type=section["type"],
-                order=section["order"],
+                order=i,  # Use the index as the order
                 metadata=section["metadata"]
             ))
-            
+        print("SECTIONS", sections)
+        
+        # Get metadata fields from the correct location
+        metadata = tutorial_data["metadata"]
         return TutorialResponse(
             id=tutorial_id,
-            title=tutorial_data["title"],
-            description=tutorial_data["description"],
-            source_content_id=tutorial_data.get("source_content_id"),
-            source_type=tutorial_data.get("source_type"),
-            source_url=tutorial_data.get("source_url"),
-            generated_date=tutorial_data["metadata"]["generated_date"],
+            title=metadata["title"],
+            description=sections[0].content if sections else "",  # Use first section (summary) as description
+            source_content_id=metadata.get("content_id"),
+            source_type=metadata.get("content_type"),
+            source_url=metadata.get("source_url"),
+            generated_date=metadata["generated_date"],
             sections=sorted(sections, key=lambda x: x.order),
-            metadata=tutorial_data["metadata"]
+            metadata=metadata
         )
         
     except Exception as e:
+        print(f"Error in get_tutorial_detail: {str(e)}")  # Add debug logging
         raise HTTPException(status_code=500, detail=str(e)) 

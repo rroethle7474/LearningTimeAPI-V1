@@ -97,9 +97,17 @@ async def process_content_task(
             logger.debug("Generated embeddings")
             
             # Store in vector store
-            collection = vector_store.get_collection(content_type)
-            logger.debug(f"Storing in {content_type} collection")
+            print(f"Storing in {content_type}")
+            if content_type == "article":
+                collection_name = "articles_content"
+            elif content_type == "youtube":
+                collection_name = "youtube_content"
+            else:
+                raise ValueError(f"Invalid content type: {content_type}")
             
+            logger.debug(f"Storing in {collection_name} collection")
+            
+
             try:
                 # Generate a content ID
                 content_id = str(uuid.uuid4())
@@ -118,10 +126,10 @@ async def process_content_task(
                     "processed_date": metadata.processed_date.isoformat() if metadata.processed_date else None
                 }
                 
-                # Store using new method
+                # Store using new method with correct collection name
                 vector_store.add_content(
                     content_id=content_id,
-                    content_type=content_type,
+                    content_type=content_type,  # Use the original content_type instead of collection_name
                     chunks=chunks,
                     embeddings=embeddings,
                     metadata=metadata_dict

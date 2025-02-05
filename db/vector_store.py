@@ -25,42 +25,45 @@ class VectorStore:
             
             print(f"Initialized ChromaDB client: {type(self.client).__name__}")
             self.embedding_generator = embedding_generator
+            
+            # First ensure collections exist
+            self._ensure_collections_exist()
+            # Then initialize instance variables
             self._init_collections()
         except Exception as e:
             print(f"ChromaDB initialization error: {str(e)}")
             raise
     
-    def _init_collections(self):
-        """Initialize or get existing collections"""
-        self.articles = self.client.get_or_create_collection(
-            name="articles_content",
-            metadata={"description": "Stores article content and embeddings"}
-        )
+    def _ensure_collections_exist(self):
+        """Ensure required collections exist"""
+        required_collections = [
+            "articles_content",
+            "youtube_content",
+            "tutorials",
+            "tutorial_sections"
+        ]
         
-        self.youtube = self.client.get_or_create_collection(
-            name="youtube_content",
-            metadata={"description": "Stores video transcripts and embeddings"}
-        )
+        # In v0.6.0, list_collections() returns collection names directly
+        existing_collections = self.client.list_collections()
         
-        # Updated tutorial collection with string metadata
-        self.tutorials = self.client.get_or_create_collection(
-            name="tutorials",
-            metadata={
-                "description": "Stores generated tutorials",
-                "schema_version": "2.0",
-                "section_types": ",".join(TutorialSectionType.__args__)  # Use the Literal types
-            }
-        )
+        for collection_name in required_collections:
+            if collection_name not in existing_collections:
+                logger.info(f"Creating collection: {collection_name}")
+                self.client.create_collection(name=collection_name)
 
-        # New collection for tutorial sections
-        self.tutorial_sections = self.client.get_or_create_collection(
-            name="tutorial_sections",
-            metadata={
-                "description": "Stores individual tutorial sections",
-                "schema_version": "2.0"
-            }
-        )
-    
+    def _init_collections(self):
+        """Initialize instance variables for collections"""
+        logger.debug("Initializing collection instance variables")
+        try:
+            self.articles = self.client.get_collection("articles_content")
+            self.youtube = self.client.get_collection("youtube_content")
+            self.tutorials = self.client.get_collection("tutorials")
+            self.tutorial_sections = self.client.get_collection("tutorial_sections")
+            logger.debug("Successfully initialized all collection instance variables")
+        except Exception as e:
+            logger.error(f"Error initializing collections: {str(e)}")
+            raise
+
     def add_tutorial(
         self,
         tutorial_id: str,
@@ -89,6 +92,7 @@ class VectorStore:
 
     def get_tutorial_with_sections(self, tutorial_id: str) -> Dict[str, Any]:
         """Retrieve a tutorial with all its sections"""
+        print("GET TUTORIAL WITH SECTIONS", tutorial_id)
         tutorial = self.tutorials.get(ids=[tutorial_id])
         if not tutorial or not tutorial["documents"]:
             raise ValueError(f"Tutorial not found: {tutorial_id}")
@@ -112,25 +116,30 @@ class VectorStore:
         
         return tutorial_data
 
-    def get_collection(self, collection_name: str):
-        """Get a collection by name"""
-        # Map collection names to instance variables
+    def get_collection(self, content_type: str) -> Any:
+        """Get collection by content type or collection name"""
+        # First check if this is a direct collection name
+        if content_type in ["articles_content", "youtube_content", "tutorials", "tutorial_sections"]:
+            try:
+                return self.client.get_collection(name=content_type)
+            except Exception as e:
+                raise ValueError(f"Error accessing collection {content_type}: {str(e)}")
+        
+        # If not, try to map from content type to collection name
         collection_map = {
-            "articles_content": self.articles,
-            "youtube_content": self.youtube,
-            "tutorials": self.tutorials,
-            "tutorial_sections": self.tutorial_sections
+            "article": "articles_content",
+            "youtube": "youtube_content",
+            "youtubes_content": "youtube_content"
         }
         
-        # First check the mapping
-        if collection_name in collection_map:
-            return collection_map[collection_name]
+        collection_name = collection_map.get(content_type)
+        if not collection_name:
+            raise ValueError(f"Invalid content type: {content_type}")
         
-        # Try getting from client directly
         try:
             return self.client.get_collection(name=collection_name)
         except Exception as e:
-            raise ValueError(f"Unknown collection: {collection_name}. Error: {str(e)}")
+            raise ValueError(f"Error accessing collection {collection_name}: {str(e)}")
     
     def add_to_collection(
         self,
@@ -276,12 +285,12 @@ class VectorStore:
     def get_content_by_id(self, content_id: str, content_type: str) -> Optional[Dict[str, Any]]:
         """Get all chunks and metadata for a specific content_id"""
         collection = self.get_collection(content_type)
-        
+        print("COLLECTION", collection)
         # Query for all chunks with this content_id
         results = collection.get(
             where={"content_id": content_id}
         )
-        
+        print("RESULTS", results)
         if not results or not results["ids"]:
             return None
         
