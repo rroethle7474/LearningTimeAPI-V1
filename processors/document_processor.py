@@ -69,54 +69,11 @@ class DocumentProcessor:
             pdf_file.close()
 
     async def _process_doc(self, content: bytes) -> str:
-        """
-        Process .doc files using antiword
-        Falls back to docx2txt if antiword fails
-        """
-        try:
-            # Create a temporary file to store the .doc content
-            with tempfile.NamedTemporaryFile(suffix='.doc', delete=False) as temp_file:
-                temp_file.write(content)
-                temp_path = temp_file.name
-
-            try:
-                # Try antiword first (more reliable for .doc files)
-                result = subprocess.run(
-                    ['antiword', temp_path],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                extracted_text = result.stdout.strip()
-                
-                # If antiword extracted content successfully, return it
-                if extracted_text:
-                    return extracted_text
-                    
-            except (subprocess.SubprocessError, FileNotFoundError):
-                # If antiword fails or isn't installed, fall back to docx2txt
-                logger.warning("Antiword failed, falling back to docx2txt")
-                return await self._fallback_doc_process(content)
-                
-        except Exception as e:
-            logger.error(f"Error processing .doc file: {str(e)}")
-            # Try fallback method
-            return await self._fallback_doc_process(content)
-            
-        finally:
-            # Clean up temporary file
-            if 'temp_path' in locals():
-                try:
-                    os.unlink(temp_path)
-                except Exception:
-                    pass
-
-    async def _fallback_doc_process(self, content: bytes) -> str:
-        """Fallback method using docx2txt"""
+        """Process .doc files"""
         try:
             return docx2txt.process(io.BytesIO(content))
         except Exception as e:
-            raise Exception(f"All .doc processing methods failed. Last error: {str(e)}")
+            raise Exception(f"Failed to process DOC file: {str(e)}")
 
     async def _process_docx(self, content: bytes) -> str:
         """Process .docx files"""
