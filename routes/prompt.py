@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from services.context_generation_service import ContextGenerationService
 from search.semantic_search import SemanticSearch
@@ -19,6 +19,12 @@ router = APIRouter(tags=["prompts"])
 
 class ContextRequest(BaseModel):
     query: str
+    min_similarity: Optional[float] = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Minimum similarity threshold (0-1). Higher values return more relevant results."
+    )
 
 class ContextResponse(BaseModel):
     context: str
@@ -39,8 +45,23 @@ async def generate_context(
     """Generate context based on user query"""
     try:
         logger.debug(f"Received context generation request: {request.query}")
-        context = await service.generate_context(request.query)
+        context = await service.generate_context(
+            query=request.query,
+            min_similarity=request.min_similarity
+        )
+        
+        # If no context was generated, return a more specific error
+        if not context or context in [
+            "No relevant context found for the given query.",
+            "No sufficiently relevant content found for the given query."
+        ]:
+            return ContextResponse(
+                context="No relevant context found for the given query.",
+                error="No relevant content found. Try rephrasing your query or adjusting the similarity threshold."
+            )
+            
         return ContextResponse(context=context)
+        
     except Exception as e:
         logger.error(f"Error generating context: {str(e)}")
         raise HTTPException(

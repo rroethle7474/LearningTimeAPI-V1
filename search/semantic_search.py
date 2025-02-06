@@ -34,7 +34,7 @@ class SemanticSearch:
                 where=filters
             )
             
-            print(f"Raw results for {collection}:", results)  # Debug print
+            # print(f"Raw results for {collection}:", results)  # Debug print
             
             # Check if we got any results and if the first id list is empty
             if (not results or 
@@ -95,9 +95,7 @@ class SemanticSearch:
         Search across multiple collections
         """
         results = {}
-        print("COLLECTIONS", collections)
         for collection in collections:
-            print("COLLECTION", collection)
             collection_results = await self.search(
                 query=query,
                 collection=collection,

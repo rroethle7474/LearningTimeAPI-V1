@@ -15,10 +15,16 @@ class ContextGenerationService:
         self.llm_client = llm_client
         self.semantic_search = semantic_search
         
-    async def generate_context(self, query: str) -> str:
-        """Generate context based on query using semantic search and LLM summarization"""
-        logger.debug(f"Generating context for query: {query}")
+    async def generate_context(self, query: str, min_similarity: float = 0.5) -> str:
+        """
+        Generate context based on query using semantic search and LLM summarization
         
+        Args:
+            query: The user's query string
+            min_similarity: Minimum similarity threshold (0-1) for including results
+        """
+        logger.debug(f"Generating context for query: {query}")
+        print("Similarity threshold: ", min_similarity)
         try:
             # Search across all relevant collections
             search_results = await self.semantic_search.multi_collection_search(
@@ -26,20 +32,55 @@ class ContextGenerationService:
                 collections=["articles_content", "youtube_content"],
                 limit_per_collection=3
             )
-            
+            print("Search results retrieved")
             if not any(search_results["collections"].values()):
                 logger.warning("No relevant content found in vector store")
                 return "No relevant context found for the given query."
 
             # Format search results into context sections
             context_sections = []
+            relevant_content_found = False
+            
             for collection_name, results in search_results["collections"].items():
-                if results:  # Only add section if there are results
+                if not results:
+                    continue
+                    
+                result = results[0]  # Get the first (and only) result dict
+                contents = result['content']
+                metadatas = result['metadata']
+                distances = result.get('distance', [])
+                
+                # Filter and format relevant content
+                relevant_items = []
+                for i in range(len(contents)):
+                    # Calculate similarity score (1 - distance)
+                    # Distance of 0 means perfect match (similarity = 1)
+                    # Distance of 2 means completely different (similarity = 0)
+                    similarity = 1 - (distances[i] / 2) if i < len(distances) else 0
+                    print("Similarity: ", similarity)
+                    if similarity >= min_similarity:
+                        relevant_items.append({
+                            'content': contents[i],
+                            'metadata': metadatas[i],
+                            'similarity': similarity
+                        })
+                        relevant_content_found = True
+                
+                if relevant_items:
+                    # Sort by similarity
+                    relevant_items.sort(key=lambda x: x['similarity'], reverse=True)
+                    
+                    # Add collection header
                     context_sections.append(f"\n### {collection_name.upper()} SOURCES:")
-                    for result in results:
-                        # Add source metadata if available
-                        source_info = f"Source: {result.get('metadata', {}).get('source_url', 'Unknown source')}"
-                        context_sections.append(f"\n{source_info}\n{result['content']}\n")
+                    
+                    # Add each relevant item
+                    for item in relevant_items:
+                        source_info = f"Source: {item['metadata'].get('title', 'Unknown source')} (Relevance: {item['similarity']:.2f})"
+                        context_sections.append(f"\n{source_info}\n{item['content']}\n")
+
+            if not relevant_content_found:
+                logger.warning("No content met the minimum similarity threshold")
+                return "No sufficiently relevant content found for the given query."
 
             context = "\n".join(context_sections)
 
