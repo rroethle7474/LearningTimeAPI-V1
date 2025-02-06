@@ -3,34 +3,31 @@ from typing import List, Union
 import numpy as np
 
 class EmbeddingGenerator:
-    def __init__(self, model_name: str = 'all-MiniLM-L6-v2'):
-        """Initialize the embedding model"""
-        self.model = SentenceTransformer(model_name)
-    
-    def generate(
-        self,
-        texts: Union[str, List[str]],
-        batch_size: int = 32
-    ) -> List[List[float]]:
-        """Generate embeddings for the given texts"""
-        # Handle single text input
-        if isinstance(texts, str):
-            texts = [texts]
+    def __init__(self):
+        # Initialize the model
+        self.model = SentenceTransformer('all-MiniLM-L6-v2')
         
-        # Generate embeddings
-        embeddings = self.model.encode(
-            texts,
-            batch_size=batch_size,
-            show_progress_bar=False,
-            convert_to_tensor=True
-        )
-        
-        # Convert to numpy array and then to list
-        if hasattr(embeddings, 'cpu'):
-            embeddings = embeddings.cpu()
-        embeddings_np = np.array(embeddings)
-        
-        return embeddings_np.tolist()
+    def generate(self, text: str) -> List[float]:
+        """Generate embeddings for the given text"""
+        try:
+            # Encode the text and get embeddings
+            embeddings = self.model.encode(text)
+            # Convert numpy array to list and ensure correct shape
+            return embeddings.tolist()  # Changed from reshape to tolist()
+        except Exception as e:
+            print(f"Error generating embeddings: {str(e)}")
+            raise
+            
+    def generate_batch(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings for multiple texts"""
+        try:
+            # Encode multiple texts at once
+            embeddings = self.model.encode(texts)
+            # Convert numpy array to list
+            return embeddings.tolist()
+        except Exception as e:
+            print(f"Error generating batch embeddings: {str(e)}")
+            raise
     
     def normalize_embeddings(self, embeddings: List[List[float]]) -> List[List[float]]:
         """Normalize embeddings to unit length"""

@@ -1,11 +1,12 @@
 import io
-from typing import Dict, Callable, Coroutine, Any
+from typing import Dict, Callable, Coroutine, Any, List, Tuple
 import PyPDF2
 import docx
 import docx2txt
 import subprocess
 import tempfile
 import os
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 class DocumentProcessor:
     def __init__(self):
@@ -15,28 +16,28 @@ class DocumentProcessor:
             '.doc': self._process_doc,
             '.docx': self._process_docx
         }
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200,
+            length_function=len,
+            separators=["\n\n", "\n", " ", ""]
+        )
     
-    async def process_document(self, file_content: bytes, filename: str) -> str:
+    async def process_document(self, file_content: bytes, filename: str) -> Tuple[str, List[str]]:
         """
         Process a document file and extract its text content.
         
-        Args:
-            file_content (bytes): Raw file content
-            filename (str): Original filename with extension
-            
         Returns:
-            str: Extracted text content
-            
-        Raises:
-            ValueError: If file type is unsupported
-            Exception: If processing fails
+            Tuple[str, List[str]]: (full_text, chunks)
         """
         ext = self._get_extension(filename.lower())
         if ext not in self.extractors:
             raise ValueError(f"Unsupported file type: {ext}")
             
         try:
-            return await self.extractors[ext](file_content)
+            full_text = await self.extractors[ext](file_content)
+            chunks = self.text_splitter.split_text(full_text)
+            return full_text, chunks
         except Exception as e:
             raise Exception(f"Failed to process {ext} file: {str(e)}")
 
@@ -57,13 +58,14 @@ class DocumentProcessor:
     async def _process_pdf(self, content: bytes) -> str:
         """Process .pdf files"""
         text = []
+        print("PROCESSING PDF")
         try:
             pdf_file = io.BytesIO(content)
             pdf_reader = PyPDF2.PdfReader(pdf_file)
             
             for page in pdf_reader.pages:
                 text.append(page.extract_text())
-            
+            print("TEXT", text)
             return "\n".join(text)
         finally:
             pdf_file.close()

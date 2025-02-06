@@ -24,14 +24,19 @@ async def process_document_task(
 ) -> None:
     """Background task to process and store document"""
     try:
-        # Extract content from document
-        content = await document_processor.process_document(file_content, filename)
+        # Extract content and chunks from document
+        full_text, chunks = await document_processor.process_document(file_content, filename)
         
-        # Generate embeddings
-        embeddings = await embedding_generator.generate_embeddings(content)
+        # Generate embeddings for each chunk
+        chunk_embeddings = []
+        for chunk in chunks:
+            embedding = embedding_generator.generate(chunk)
+            # Flatten embedding
+            flattened_embedding = embedding[0][0] if isinstance(embedding, list) and len(embedding) > 0 else embedding
+            chunk_embeddings.append(flattened_embedding)
         
-        # Create document metadata
-        metadata = DocumentMetadata(
+        # Create base metadata
+        base_metadata = DocumentMetadata(
             title=title,
             tags=tags.split(',') if tags else [],
             file_type=os.path.splitext(filename)[1],
@@ -40,17 +45,70 @@ async def process_document_task(
             source_file=filename
         )
         
-        # Store in vector database
+        # Generate document ID
         document_id = str(uuid.uuid4())
-        vector_store.add_document(
-            document_id=document_id,
-            content=content,
-            metadata=metadata,
-            embeddings=embeddings
+        
+        # Store chunks with metadata
+        chunk_ids = []
+        for i, (chunk, embedding) in enumerate(zip(chunks, chunk_embeddings)):
+            chunk_id = f"{document_id}_chunk_{i}"
+            chunk_ids.append(chunk_id)
+            
+            # Create a new DocumentMetadata instance for the chunk
+            chunk_metadata = DocumentMetadata(
+                title=base_metadata.title,
+                tags=base_metadata.tags,
+                file_type=base_metadata.file_type,
+                file_size=base_metadata.file_size,
+                upload_date=base_metadata.upload_date,
+                source_file=base_metadata.source_file
+            )
+            
+            # Add chunk-specific fields to metadata dict after conversion
+            chunk_metadata_dict = chunk_metadata.dict()
+            chunk_metadata_dict.update({
+                "document_id": document_id,
+                "chunk_index": i,
+                "total_chunks": len(chunks),
+                "is_chunk": True
+            })
+            
+            vector_store.add_document(
+                document_id=chunk_id,
+                content=chunk,
+                metadata=chunk_metadata,  # Pass the DocumentMetadata object
+                embeddings=embedding
+            )
+        
+        # Store full document metadata
+        full_doc_metadata = DocumentMetadata(
+            title=base_metadata.title,
+            tags=base_metadata.tags,
+            file_type=base_metadata.file_type,
+            file_size=base_metadata.file_size,
+            upload_date=base_metadata.upload_date,
+            source_file=base_metadata.source_file
         )
         
-        # Update task status
-        # Note: In a production system, you'd want to store task statuses in a database
+        # Add full document specific fields
+        full_metadata_dict = full_doc_metadata.dict()
+        # Convert tags list to comma-separated string
+        full_metadata_dict["tags"] = ",".join(full_metadata_dict["tags"])
+        # Convert datetime to ISO format string
+        full_metadata_dict["upload_date"] = full_metadata_dict["upload_date"].isoformat()
+        # Convert chunk_ids list to comma-separated string
+        full_metadata_dict.update({
+            "chunk_ids": ",".join(chunk_ids),  # Convert list of chunk IDs to string
+            "is_chunk": False
+        })
+        
+        # Store full document (without embeddings)
+        vector_store.store_full_document(
+            document_id=document_id,
+            content=full_text,
+            metadata=full_metadata_dict
+        )
+        
         return document_id
         
     except Exception as e:
@@ -72,6 +130,7 @@ async def upload_document(
     # Validate file extension
     allowed_extensions = {'.txt', '.pdf', '.doc', '.docx'}
     file_ext = os.path.splitext(file.filename)[1].lower()
+    print("FILE EXTENSION", file_ext)
     if file_ext not in allowed_extensions:
         raise HTTPException(
             status_code=400,
@@ -168,4 +227,30 @@ async def search_documents(
         
         return results
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/status/{task_id}", response_model=DocumentStatus)
+async def get_document_status(
+    task_id: str,
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """
+    Check the status of a document processing task
+    """
+    try:
+        # For now, since we're processing synchronously, we can just check if the document exists
+        # In a production system, you'd want to check a task queue or database
+        if hasattr(vector_store, 'task_statuses') and task_id in vector_store.task_statuses:
+            return vector_store.task_statuses[task_id]
+            
+        return DocumentStatus(
+            task_id=task_id,
+            status="not_found",
+            error="Task not found"
+        )
+    except Exception as e:
+        return DocumentStatus(
+            task_id=task_id,
+            status="error",
+            error=str(e)
+        ) 

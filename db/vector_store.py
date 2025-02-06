@@ -485,42 +485,51 @@ class VectorStore:
         limit: int = 5,
         filters: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
-        """
-        Search documents using vector similarity
-        
-        Args:
-            query_embedding: Vector embedding of the search query
-            limit: Maximum number of results to return
-            filters: Optional metadata filters
-            
-        Returns:
-            List of matching documents with their metadata and similarity scores
-        """
+        """Search document chunks and return results with parent document info"""
         try:
+            # Add chunk filter
+            chunk_filter = {"is_chunk": True}
+            if filters:
+                filters = {**filters, **chunk_filter}
+            else:
+                filters = chunk_filter
+            
             results = self.documents.query(
                 query_embeddings=[query_embedding],
                 n_results=limit,
                 where=filters
             )
             
-            documents = []
+            # Process results to include parent document info
+            processed_results = []
             for i, (doc_id, distance) in enumerate(zip(results["ids"][0], results["distances"][0])):
                 metadata = results["metadatas"][0][i]
-                documents.append({
-                    "document_id": doc_id,
-                    "content": results["documents"][0][i],
-                    "metadata": {
-                        "title": metadata["title"],
-                        "tags": metadata["tags"].split(","),
-                        "file_type": metadata["file_type"],
-                        "file_size": metadata["file_size"],
-                        "upload_date": datetime.fromisoformat(metadata["upload_date"]),
-                        "source_file": metadata["source_file"]
-                    },
-                    "similarity": 1 - distance  # Convert distance to similarity score
+                parent_doc = self.get_document(metadata["document_id"])
+                
+                processed_results.append({
+                    "chunk_id": doc_id,
+                    "chunk_content": results["documents"][0][i],
+                    "chunk_index": metadata["chunk_index"],
+                    "document_id": metadata["document_id"],
+                    "document_title": metadata["title"],
+                    "document_metadata": parent_doc["metadata"] if parent_doc else metadata,
+                    "similarity": 1 - distance
                 })
             
-            return documents
+            return processed_results
+        
         except Exception as e:
             logger.error(f"Error searching documents: {str(e)}")
+            raise
+
+    def store_full_document(self, document_id: str, content: str, metadata: Dict[str, Any]):
+        """Store full document text and metadata (without embeddings)"""
+        try:
+            self.documents.add(
+                ids=[document_id],
+                documents=[content],
+                metadatas=[metadata]
+            )
+        except Exception as e:
+            logger.error(f"Error storing full document {document_id}: {str(e)}")
             raise 

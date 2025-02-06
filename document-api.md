@@ -92,6 +92,21 @@ Search through documents.
 }[]
 ```
 
+### Check Document Status
+Check the status of a document upload/processing task.
+
+**Endpoint:** `GET /api/document/status/{task_id}`
+
+**Response:**
+```typescript
+{
+  task_id: string;       // Processing task ID
+  status: string;        // "completed", "processing", "failed", or "not_found"
+  document_id?: string;  // Unique document ID (if completed)
+  error?: string;        // Error message (if failed)
+}
+```
+
 ## Multi-Collection Search
 
 ### Search Across All Collections
