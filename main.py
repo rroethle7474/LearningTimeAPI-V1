@@ -7,7 +7,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from fastapi import FastAPI
-from routes import content, tutorial, search, prompt
+from routes import content, tutorial, search, prompt, document
 from db.vector_store import VectorStore
 from embeddings.generator import EmbeddingGenerator
 from generators.tutorial import TutorialGenerator
@@ -64,4 +64,5 @@ context_generation_service = ContextGenerationService(llm_client, semantic_searc
 app.include_router(content.router, prefix="/api/content", tags=["content"])
 app.include_router(tutorial.router, prefix="/api/tutorial")
 app.include_router(search.router, prefix="/api/search", tags=["search"])
-app.include_router(prompt.router, prefix="/api/prompt", tags=["prompts"]) 
+app.include_router(prompt.router, prefix="/api/prompt", tags=["prompts"])
+app.include_router(document.router, prefix="/api/document", tags=["documents"]) 

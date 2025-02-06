@@ -123,22 +123,16 @@ async def search_single_collection(
 @router.get("/multi", response_model=SearchResponse)
 async def search_multiple_collections(
     query: str,
-    collections: List[str] = Query(...),
+    collections: str = Query(...),  # Changed from List[str] to str
     limit_per_collection: int = 3,
-    min_similarity: float = Query(default=MINIMUM_SIMILARITY_THRESHOLD, ge=0.0, le=1.0, description="Minimum similarity threshold (0-1). Higher values return more relevant results."),
+    min_similarity: float = Query(default=MINIMUM_SIMILARITY_THRESHOLD, ge=0.0, le=1.0),
     semantic_search: SemanticSearch = Depends(get_semantic_search)
 ):
     """Search across multiple collections"""
     try:
-        # Split any collections that contain commas and flatten the list
-        expanded_collections = []
-        for collection in collections:
-            expanded_collections.extend(collection.split(','))
+        # Split the comma-separated collections string
+        cleaned_collections = [c.strip() for c in collections.split(',')]
         
-        # Clean up the collection names
-        cleaned_collections = [c.strip() for c in expanded_collections]
-        
-        print("Processing collections:", cleaned_collections)
         results = await semantic_search.multi_collection_search(
             query=query,
             collections=cleaned_collections,
@@ -147,12 +141,18 @@ async def search_multiple_collections(
         
         # Combine and process all results
         processed_results = []
-        for collection_results in results["collections"].values():
+        for collection_name, collection_results in results["collections"].items():
             for result in collection_results:
                 formatted_result = format_search_result(result)
                 if formatted_result.distance >= min_similarity:
+                    # Add collection type to metadata if not present
+                    if "content_type" not in formatted_result.metadata:
+                        formatted_result.metadata["content_type"] = collection_name
                     processed_results.append(formatted_result)
-            
+        
+        # Sort results by similarity score
+        processed_results.sort(key=lambda x: x.distance or 0, reverse=True)
+        
         return SearchResponse(query=query, results=processed_results)
         
     except Exception as e:

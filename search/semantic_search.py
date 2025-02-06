@@ -94,6 +94,10 @@ class SemanticSearch:
         """
         Search across multiple collections
         """
+        # Always include documents collection unless explicitly excluded
+        if "documents" not in collections and "all" in collections:
+            collections.append("documents")
+        
         results = {}
         for collection in collections:
             collection_results = await self.search(
