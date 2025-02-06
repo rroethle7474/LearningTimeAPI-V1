@@ -1,6 +1,5 @@
 def format_duration(duration: str) -> str:
     """Convert ISO 8601 duration to readable format"""
-    print("DURATION", duration)
     if not duration or not isinstance(duration, str):
         return ""
     

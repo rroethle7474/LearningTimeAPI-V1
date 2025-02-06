@@ -6,6 +6,7 @@ from app_types.tutorial import TutorialSectionType
 import logging
 from embeddings.generator import EmbeddingGenerator  # Add this import
 import json
+from app_types.document import DocumentMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,8 @@ class VectorStore:
             "articles_content",
             "youtube_content",
             "tutorials",
-            "tutorial_sections"
+            "tutorial_sections",
+            "documents"  # Add documents collection
         ]
         
         # In v0.6.0, list_collections() returns collection names directly
@@ -59,6 +61,7 @@ class VectorStore:
             self.youtube = self.client.get_collection("youtube_content")
             self.tutorials = self.client.get_collection("tutorials")
             self.tutorial_sections = self.client.get_collection("tutorial_sections")
+            self.documents = self.client.get_collection("documents")  # Add documents collection
             logger.debug("Successfully initialized all collection instance variables")
         except Exception as e:
             logger.error(f"Error initializing collections: {str(e)}")
@@ -388,4 +391,136 @@ class VectorStore:
             
         except Exception as e:
             logger.error(f"Error deleting tutorial {tutorial_id}: {str(e)}")
+            raise 
+
+    def add_document(
+        self,
+        document_id: str,
+        content: str,
+        metadata: DocumentMetadata,
+        embeddings: List[float]
+    ) -> None:
+        """
+        Add a document to the vector store with metadata and tags
+        
+        Args:
+            document_id: Unique identifier for the document
+            content: Extracted text content from the document
+            metadata: Document metadata including title, tags, etc.
+            embeddings: Vector embeddings for the document content
+        """
+        try:
+            self.documents.add(
+                ids=[document_id],
+                documents=[content],
+                embeddings=[embeddings],
+                metadatas=[{
+                    "title": metadata.title,
+                    "tags": ",".join(metadata.tags),
+                    "file_type": metadata.file_type,
+                    "file_size": metadata.file_size,
+                    "upload_date": metadata.upload_date.isoformat(),
+                    "source_file": metadata.source_file
+                }]
+            )
+            logger.debug(f"Successfully added document {document_id}")
+        except Exception as e:
+            logger.error(f"Error adding document {document_id}: {str(e)}")
+            raise
+
+    def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a document by its ID
+        
+        Args:
+            document_id: The ID of the document to retrieve
+            
+        Returns:
+            Dictionary containing document content and metadata, or None if not found
+        """
+        try:
+            result = self.documents.get(
+                ids=[document_id]
+            )
+            
+            if not result["ids"]:
+                return None
+                
+            metadata = result["metadatas"][0]
+            return {
+                "document_id": document_id,
+                "content": result["documents"][0],
+                "metadata": {
+                    "title": metadata["title"],
+                    "tags": metadata["tags"].split(","),
+                    "file_type": metadata["file_type"],
+                    "file_size": metadata["file_size"],
+                    "upload_date": datetime.fromisoformat(metadata["upload_date"]),
+                    "source_file": metadata["source_file"]
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error retrieving document {document_id}: {str(e)}")
+            raise
+
+    def delete_document(self, document_id: str) -> None:
+        """
+        Delete a document by its ID
+        
+        Args:
+            document_id: The ID of the document to delete
+        """
+        try:
+            self.documents.delete(
+                ids=[document_id]
+            )
+            logger.debug(f"Successfully deleted document {document_id}")
+        except Exception as e:
+            logger.error(f"Error deleting document {document_id}: {str(e)}")
+            raise
+
+    def search_documents(
+        self,
+        query_embedding: List[float],
+        limit: int = 5,
+        filters: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Search documents using vector similarity
+        
+        Args:
+            query_embedding: Vector embedding of the search query
+            limit: Maximum number of results to return
+            filters: Optional metadata filters
+            
+        Returns:
+            List of matching documents with their metadata and similarity scores
+        """
+        try:
+            results = self.documents.query(
+                query_embeddings=[query_embedding],
+                n_results=limit,
+                where=filters
+            )
+            
+            documents = []
+            for i, (doc_id, distance) in enumerate(zip(results["ids"][0], results["distances"][0])):
+                metadata = results["metadatas"][0][i]
+                documents.append({
+                    "document_id": doc_id,
+                    "content": results["documents"][0][i],
+                    "metadata": {
+                        "title": metadata["title"],
+                        "tags": metadata["tags"].split(","),
+                        "file_type": metadata["file_type"],
+                        "file_size": metadata["file_size"],
+                        "upload_date": datetime.fromisoformat(metadata["upload_date"]),
+                        "source_file": metadata["source_file"]
+                    },
+                    "similarity": 1 - distance  # Convert distance to similarity score
+                })
+            
+            return documents
+        except Exception as e:
+            logger.error(f"Error searching documents: {str(e)}")
             raise 

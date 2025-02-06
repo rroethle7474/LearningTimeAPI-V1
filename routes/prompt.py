@@ -30,12 +30,10 @@ class ContextResponse(BaseModel):
     context: str
     error: Optional[str] = None
 
-def get_context_service(
-    llm_client = Depends(get_llm_client),
-    semantic_search: SemanticSearch = Depends(get_semantic_search)
-):
+def get_context_service():
     """Dependency to get context generation service"""
-    return ContextGenerationService(llm_client, semantic_search)
+    from main import context_generation_service
+    return context_generation_service
 
 @router.post("/generate", response_model=ContextResponse)
 async def generate_context(

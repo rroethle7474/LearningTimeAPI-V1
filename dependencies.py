@@ -31,6 +31,6 @@ def get_tutorial_generator(
 def get_semantic_search(
     vector_store: VectorStore = Depends(get_vector_store),
     embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
-):
+) -> SemanticSearch:
     """Dependency to get semantic search instance"""
     return SemanticSearch(vector_store, embedding_generator) 

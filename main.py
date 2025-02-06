@@ -16,6 +16,8 @@ from llm.factory import LLMFactory
 from config import settings
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from services.context_generation_service import ContextGenerationService
+from processors.document_processor import DocumentProcessor
 
 # Load environment variables at startup
 load_dotenv()
@@ -35,12 +37,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize services in the correct order
+# Initialize services
 embedding_generator = EmbeddingGenerator()
 vector_store = VectorStore(
     persist_directory=settings.CHROMADB_PATH,
     embedding_generator=embedding_generator
 )
+
+# Initialize document processor
+document_processor = DocumentProcessor()
 
 # Initialize LLM client (prioritize OpenAI over Anthropic)
 if settings.OPENAI_API_KEY:
@@ -53,6 +58,7 @@ else:
 # Initialize other services that depend on the above
 tutorial_generator = TutorialGenerator(llm_client, vector_store, embedding_generator)
 semantic_search = SemanticSearch(vector_store, embedding_generator)
+context_generation_service = ContextGenerationService(llm_client, semantic_search)
 
 # Include routers
 app.include_router(content.router, prefix="/api/content", tags=["content"])
