@@ -3,6 +3,7 @@ from typing import List, Optional
 import uuid
 from datetime import datetime
 import os
+from fastapi.responses import JSONResponse
 
 from db.vector_store import VectorStore
 from processors.document_processor import DocumentProcessor
@@ -26,15 +27,23 @@ async def process_document_task(
     try:
         # Extract content and chunks from document
         full_text, chunks = await document_processor.process_document(file_content, filename)
-        
+        print("CHUNKS", chunks)
         # Generate embeddings for each chunk
         chunk_embeddings = []
         for chunk in chunks:
             embedding = embedding_generator.generate(chunk)
-            # Flatten embedding
-            flattened_embedding = embedding[0][0] if isinstance(embedding, list) and len(embedding) > 0 else embedding
-            chunk_embeddings.append(flattened_embedding)
-        
+            # Ensure we get a flat 1D list by recursively flattening
+            while isinstance(embedding, list) and isinstance(embedding[0], list):
+                embedding = embedding[0]
+            
+            # Add some validation
+            if not isinstance(embedding, list):
+                raise ValueError(f"Expected list of floats, got {type(embedding)}")
+            if not all(isinstance(x, (int, float)) for x in embedding):
+                raise ValueError("All elements must be numbers")
+                
+            chunk_embeddings.append(embedding)
+        print("CHUNK EMBEDDINGS", chunk_embeddings)
         # Create base metadata
         base_metadata = DocumentMetadata(
             title=title,
@@ -44,10 +53,10 @@ async def process_document_task(
             upload_date=datetime.utcnow(),
             source_file=filename
         )
-        
+        print("BASE METADATA", base_metadata)
         # Generate document ID
         document_id = str(uuid.uuid4())
-        
+        print("DOCUMENT ID", document_id)
         # Store chunks with metadata
         chunk_ids = []
         for i, (chunk, embedding) in enumerate(zip(chunks, chunk_embeddings)):
@@ -72,14 +81,14 @@ async def process_document_task(
                 "total_chunks": len(chunks),
                 "is_chunk": True
             })
-            
+            print("CHUNK METADATA DICT", chunk_metadata_dict)
             vector_store.add_document(
                 document_id=chunk_id,
                 content=chunk,
                 metadata=chunk_metadata,  # Pass the DocumentMetadata object
                 embeddings=embedding
             )
-        
+        print("CHUNK METADATA", chunk_metadata)
         # Store full document metadata
         full_doc_metadata = DocumentMetadata(
             title=base_metadata.title,
@@ -89,7 +98,7 @@ async def process_document_task(
             upload_date=base_metadata.upload_date,
             source_file=base_metadata.source_file
         )
-        
+        print("FULL DOC METADATA", full_doc_metadata)
         # Add full document specific fields
         full_metadata_dict = full_doc_metadata.dict()
         # Convert tags list to comma-separated string
@@ -101,7 +110,7 @@ async def process_document_task(
             "chunk_ids": ",".join(chunk_ids),  # Convert list of chunk IDs to string
             "is_chunk": False
         })
-        
+        print("FULL METADATA DICT", full_metadata_dict)
         # Store full document (without embeddings)
         vector_store.store_full_document(
             document_id=document_id,
@@ -132,9 +141,14 @@ async def upload_document(
     file_ext = os.path.splitext(file.filename)[1].lower()
     print("FILE EXTENSION", file_ext)
     if file_ext not in allowed_extensions:
-        raise HTTPException(
+        return JSONResponse(
             status_code=400,
-            detail=f"Unsupported file type. Allowed types: {', '.join(allowed_extensions)}"
+            content={
+                "status": "failed",
+                "error": f"Unsupported file type. Allowed types: {', '.join(allowed_extensions)}",
+                "task_id": None,
+                "document_id": None
+            }
         )
     
     try:
@@ -155,18 +169,26 @@ async def upload_document(
             document_processor=document_processor,
             embedding_generator=embedding_generator
         )
-        
-        return DocumentStatus(
-            task_id=task_id,
-            status="completed",
-            document_id=document_id
+        print("DOCUMENT ID", document_id)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "completed",
+                "task_id": task_id,
+                "document_id": document_id,
+                "error": None
+            }
         )
         
     except Exception as e:
-        return DocumentStatus(
-            task_id=task_id,
-            status="failed",
-            error=str(e)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "failed",
+                "task_id": task_id,
+                "document_id": None,
+                "error": str(e)
+            }
         )
 
 @router.get("/{document_id}")

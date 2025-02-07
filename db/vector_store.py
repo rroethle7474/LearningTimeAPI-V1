@@ -400,20 +400,13 @@ class VectorStore:
         metadata: DocumentMetadata,
         embeddings: List[float]
     ) -> None:
-        """
-        Add a document to the vector store with metadata and tags
-        
-        Args:
-            document_id: Unique identifier for the document
-            content: Extracted text content from the document
-            metadata: Document metadata including title, tags, etc.
-            embeddings: Vector embeddings for the document content
-        """
+        """Add a document to the vector store with metadata and tags"""
         try:
+            # Wrap the embeddings in a list to match expected dimensionality
             self.documents.add(
                 ids=[document_id],
                 documents=[content],
-                embeddings=[embeddings],
+                embeddings=[[embeddings]],  # Wrap embeddings in an extra list
                 metadatas=[{
                     "title": metadata.title,
                     "tags": ",".join(metadata.tags),

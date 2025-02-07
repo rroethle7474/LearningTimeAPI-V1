@@ -12,8 +12,8 @@ class EmbeddingGenerator:
         try:
             # Encode the text and get embeddings
             embeddings = self.model.encode(text)
-            # Convert numpy array to list and ensure correct shape
-            return embeddings.tolist()  # Changed from reshape to tolist()
+            # Convert numpy array to list of floats
+            return [float(x) for x in embeddings]
         except Exception as e:
             print(f"Error generating embeddings: {str(e)}")
             raise
