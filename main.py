@@ -44,8 +44,8 @@ vector_store = VectorStore(
     embedding_generator=embedding_generator
 )
 
-# Initialize document processor
-document_processor = DocumentProcessor()
+# Initialize document processor with embedding_generator
+document_processor = DocumentProcessor(embedding_generator=embedding_generator)
 
 # Initialize LLM client (prioritize OpenAI over Anthropic)
 if settings.OPENAI_API_KEY:

@@ -406,7 +406,7 @@ class VectorStore:
             self.documents.add(
                 ids=[document_id],
                 documents=[content],
-                embeddings=[[embeddings]],  # Wrap embeddings in an extra list
+                embeddings=[embeddings],  # Wrap the single embedding in a list
                 metadatas=[{
                     "title": metadata.title,
                     "tags": ",".join(metadata.tags),

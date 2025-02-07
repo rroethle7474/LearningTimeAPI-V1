@@ -9,7 +9,7 @@ from db.vector_store import VectorStore
 from processors.document_processor import DocumentProcessor
 from embeddings.generator import EmbeddingGenerator
 from app_types.document import DocumentStatus, DocumentMetadata
-from dependencies import get_vector_store, get_embedding_generator
+from dependencies import get_vector_store, get_embedding_generator, get_document_processor
 
 router = APIRouter()
 
@@ -25,25 +25,11 @@ async def process_document_task(
 ) -> None:
     """Background task to process and store document"""
     try:
-        # Extract content and chunks from document
-        full_text, chunks = await document_processor.process_document(file_content, filename)
+        # Extract content, chunks, and embeddings from document
+        full_text, chunks, embeddings = await document_processor.process_document(file_content, filename)
         print("CHUNKS", chunks)
-        # Generate embeddings for each chunk
-        chunk_embeddings = []
-        for chunk in chunks:
-            embedding = embedding_generator.generate(chunk)
-            # Ensure we get a flat 1D list by recursively flattening
-            while isinstance(embedding, list) and isinstance(embedding[0], list):
-                embedding = embedding[0]
-            
-            # Add some validation
-            if not isinstance(embedding, list):
-                raise ValueError(f"Expected list of floats, got {type(embedding)}")
-            if not all(isinstance(x, (int, float)) for x in embedding):
-                raise ValueError("All elements must be numbers")
-                
-            chunk_embeddings.append(embedding)
-        print("CHUNK EMBEDDINGS", chunk_embeddings)
+        print("EMBEDDINGS", embeddings)
+        
         # Create base metadata
         base_metadata = DocumentMetadata(
             title=title,
@@ -53,13 +39,14 @@ async def process_document_task(
             upload_date=datetime.utcnow(),
             source_file=filename
         )
-        print("BASE METADATA", base_metadata)
+        
         # Generate document ID
         document_id = str(uuid.uuid4())
         print("DOCUMENT ID", document_id)
+        
         # Store chunks with metadata
         chunk_ids = []
-        for i, (chunk, embedding) in enumerate(zip(chunks, chunk_embeddings)):
+        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             chunk_id = f"{document_id}_chunk_{i}"
             chunk_ids.append(chunk_id)
             
@@ -81,14 +68,14 @@ async def process_document_task(
                 "total_chunks": len(chunks),
                 "is_chunk": True
             })
-            print("CHUNK METADATA DICT", chunk_metadata_dict)
+            print("EMBEDDING", embedding)
             vector_store.add_document(
                 document_id=chunk_id,
                 content=chunk,
                 metadata=chunk_metadata,  # Pass the DocumentMetadata object
                 embeddings=embedding
             )
-        print("CHUNK METADATA", chunk_metadata)
+        
         # Store full document metadata
         full_doc_metadata = DocumentMetadata(
             title=base_metadata.title,
@@ -127,7 +114,7 @@ async def process_document_task(
 async def upload_document(
     background_tasks: BackgroundTasks,
     vector_store: VectorStore = Depends(get_vector_store),
-    document_processor: DocumentProcessor = Depends(lambda: DocumentProcessor()),
+    document_processor: DocumentProcessor = Depends(get_document_processor),
     embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator),
     title: str = Form(...),
     tags: str = Form(...),

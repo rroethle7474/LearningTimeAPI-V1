@@ -7,9 +7,11 @@ import subprocess
 import tempfile
 import os
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from embeddings.generator import EmbeddingGenerator
 
 class DocumentProcessor:
-    def __init__(self):
+    def __init__(self, embedding_generator: EmbeddingGenerator):
+        self.embedding_generator = embedding_generator
         self.extractors: Dict[str, Callable[[bytes], Coroutine[Any, Any, str]]] = {
             '.txt': self._process_text,
             '.pdf': self._process_pdf,
@@ -23,12 +25,12 @@ class DocumentProcessor:
             separators=["\n\n", "\n", " ", ""]
         )
     
-    async def process_document(self, file_content: bytes, filename: str) -> Tuple[str, List[str]]:
+    async def process_document(self, file_content: bytes, filename: str) -> Tuple[str, List[str], List[List[float]]]:
         """
         Process a document file and extract its text content.
         
         Returns:
-            Tuple[str, List[str]]: (full_text, chunks)
+            Tuple[str, List[str], List[List[float]]]: (full_text, chunks, embeddings)
         """
         ext = self._get_extension(filename.lower())
         if ext not in self.extractors:
@@ -37,7 +39,10 @@ class DocumentProcessor:
         try:
             full_text = await self.extractors[ext](file_content)
             chunks = self.text_splitter.split_text(full_text)
-            return full_text, chunks
+            
+            # Generate embeddings for each chunk using the same model as tutorials
+            embeddings = self.embedding_generator.generate_batch(chunks)
+            return full_text, chunks, embeddings
         except Exception as e:
             raise Exception(f"Failed to process {ext} file: {str(e)}")
 

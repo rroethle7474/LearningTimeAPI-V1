@@ -4,6 +4,7 @@ from embeddings.generator import EmbeddingGenerator
 from llm.factory import LLMFactory
 from generators.tutorial import TutorialGenerator
 from search.semantic_search import SemanticSearch
+from processors.document_processor import DocumentProcessor
 
 def get_embedding_generator():
     """Dependency to get embedding generator instance"""
@@ -33,4 +34,11 @@ def get_semantic_search(
     embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
 ) -> SemanticSearch:
     """Dependency to get semantic search instance"""
-    return SemanticSearch(vector_store, embedding_generator) 
+    return SemanticSearch(vector_store, embedding_generator)
+
+def get_document_processor(
+    embedding_generator: EmbeddingGenerator = Depends(get_embedding_generator)
+) -> DocumentProcessor:
+    """Dependency to get document processor instance"""
+    from main import document_processor
+    return document_processor 
