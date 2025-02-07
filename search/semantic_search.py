@@ -96,7 +96,7 @@ class SemanticSearch:
         """
         # Always include documents collection unless explicitly excluded
         if "documents" not in collections and "all" in collections:
-            collections.append("documents")
+            collections.append("notes")
         
         results = {}
         for collection in collections:

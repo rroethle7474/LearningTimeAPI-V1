@@ -44,7 +44,7 @@ async def upload_document(
         
         # Process document
         full_text, chunks, embeddings = await document_processor.process_document(file_content, file.filename)
-        
+        print("DOCUMENT EMBEDDINGS", embeddings)
         # Create base metadata
         base_metadata = DocumentMetadata(
             title=title,
@@ -82,14 +82,15 @@ async def upload_document(
                 "total_chunks": len(chunks),
                 "is_chunk": True
             })
-            
+            print("CHUNK EMBEDDING", embedding)
             vector_store.add_document(
                 document_id=chunk_id,
                 content=chunk,
                 metadata=chunk_metadata,
-                embeddings=embedding
+                embeddings=[embedding]
             )
         
+
         # Store full document
         full_doc_metadata = base_metadata.dict()
         full_doc_metadata["tags"] = ",".join(full_doc_metadata["tags"])

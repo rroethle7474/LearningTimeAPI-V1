@@ -211,7 +211,7 @@ class TutorialGenerator:
             f"{section.title} {section.content}" for section in tutorial.sections
         )
         tutorial_embedding = self.embedding_generator.generate([tutorial_text])[0]
-        
+        print("TUTORIAL EMBEDDING", tutorial_embedding)
         # Store tutorial using the new schema
         tutorial_id = str(uuid.uuid4())
         self.vector_store.add_tutorial(

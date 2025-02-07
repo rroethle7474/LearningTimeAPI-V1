@@ -26,7 +26,6 @@ class VectorStore:
             
             print(f"Initialized ChromaDB client: {type(self.client).__name__}")
             self.embedding_generator = embedding_generator
-            
             # First ensure collections exist
             self._ensure_collections_exist()
             # Then initialize instance variables
@@ -42,7 +41,7 @@ class VectorStore:
             "youtube_content",
             "tutorials",
             "tutorial_sections",
-            "documents"  # Add documents collection
+            "notes"  # Add documents collection
         ]
         
         # In v0.6.0, list_collections() returns collection names directly
@@ -61,7 +60,7 @@ class VectorStore:
             self.youtube = self.client.get_collection("youtube_content")
             self.tutorials = self.client.get_collection("tutorials")
             self.tutorial_sections = self.client.get_collection("tutorial_sections")
-            self.documents = self.client.get_collection("documents")  # Add documents collection
+            self.documents = self.client.get_collection("notes")  # Add documents collection
             logger.debug("Successfully initialized all collection instance variables")
         except Exception as e:
             logger.error(f"Error initializing collections: {str(e)}")
@@ -132,7 +131,8 @@ class VectorStore:
         collection_map = {
             "article": "articles_content",
             "youtube": "youtube_content",
-            "youtubes_content": "youtube_content"
+            "youtubes_content": "youtube_content",
+            "notes": "notes"
         }
         
         collection_name = collection_map.get(content_type)
@@ -398,22 +398,24 @@ class VectorStore:
         document_id: str,
         content: str,
         metadata: DocumentMetadata,
-        embeddings: List[float]
+        embeddings: List[List[float]],
     ) -> None:
         """Add a document to the vector store with metadata and tags"""
         try:
+            # print("EMBEDDINGS FOR ADD DOCUMENT", embeddings)
+            embedding_to_use = embeddings[0] if isinstance(embeddings, list) and embeddings else embeddings
             # Wrap the embeddings in a list to match expected dimensionality
             self.documents.add(
                 ids=[document_id],
                 documents=[content],
-                embeddings=[embeddings],  # Wrap the single embedding in a list
+                embeddings=[embedding_to_use],  # Ensure single embedding is properly wrapped
                 metadatas=[{
                     "title": metadata.title,
                     "tags": ",".join(metadata.tags),
                     "file_type": metadata.file_type,
                     "file_size": metadata.file_size,
                     "upload_date": metadata.upload_date.isoformat(),
-                    "source_file": metadata.source_file
+                    "source_file": metadata.source_file 
                 }]
             )
             logger.debug(f"Successfully added document {document_id}")
@@ -526,3 +528,12 @@ class VectorStore:
         except Exception as e:
             logger.error(f"Error storing full document {document_id}: {str(e)}")
             raise 
+        
+    def _delete_collection(self, collection_name: str) -> None:
+        """Delete a specific collection"""
+        try:
+            self.client.delete_collection(name=collection_name)
+            logger.info(f"Successfully deleted collection: {collection_name}")
+        except Exception as e:
+            logger.error(f"Error deleting collection {collection_name}: {str(e)}")
+            raise

@@ -330,6 +330,7 @@ class ContentProcessor:
         return chunks
 
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        print("HOPE I AM IN HERE FOR GENERATING EMBEDDINGS")
         """Generate embeddings for a list of texts"""
         return self.embedding_model.encode(texts).tolist()
 

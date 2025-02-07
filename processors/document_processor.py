@@ -41,7 +41,7 @@ class DocumentProcessor:
             chunks = self.text_splitter.split_text(full_text)
             
             # Generate embeddings for each chunk using the same model as tutorials
-            embeddings = self.embedding_generator.generate_batch(chunks)
+            embeddings = self.embedding_generator.generate(chunks)
             return full_text, chunks, embeddings
         except Exception as e:
             raise Exception(f"Failed to process {ext} file: {str(e)}")
