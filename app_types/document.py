@@ -16,7 +16,6 @@ class DocumentSubmission(BaseModel):
     file: bytes  # File content
 
 class DocumentStatus(BaseModel):
-    task_id: str
     status: str
     document_id: Optional[str] = None
     error: Optional[str] = None
