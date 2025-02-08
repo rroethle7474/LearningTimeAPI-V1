@@ -56,6 +56,31 @@ class ContentDetailResponse(BaseModel):
     content_chunks: List[str]  # The actual content broken into chunks
     metadata: Dict[str, Any]  # Additional type-specific metadata
 
+class DocumentListItem(BaseModel):
+    id: str
+    title: str
+    file_type: str
+    tags: Optional[List[str]]
+    created_date: str
+    metadata: Dict[str, Any]
+
+class DocumentListResponse(BaseModel):
+    total: int
+    items: List[DocumentListItem]
+
+class MultiCollectionDocumentResponse(BaseModel):
+    collections: Dict[str, DocumentListResponse]
+
+class DocumentDetailResponse(BaseModel):
+    id: str
+    title: str
+    file_type: str
+    content: List[str]  # The actual document content broken into chunks
+    tags: Optional[List[str]]
+    created_date: str
+    metadata: Dict[str, Any]
+    processed_date: str
+
 def normalize_distance_score(distances: List[float]) -> float:
     """
     Convert an array of distance values into a single normalized score.
@@ -77,7 +102,6 @@ def normalize_distance_score(distances: List[float]) -> float:
 def format_search_result(result: Dict[str, Any]) -> SearchResult:
     """Format a search result, including duration formatting"""
     metadata = result["metadata"][0]
-    
     # Format duration if it exists and is a YouTube video
     if metadata.get("content_type") == "youtube" and "duration" in metadata:
         metadata = {**metadata, "duration": format_duration(metadata["duration"])}
@@ -106,14 +130,13 @@ async def search_single_collection(
             collection=collection,
             limit=limit
         )
-        print("RESULTS", results)
         # Transform the results to match the SearchResult model
         processed_results = []
+        print("HMMMM")
         for result in results["results"]:
             formatted_result = format_search_result(result)
             if formatted_result.distance >= min_similarity:
                 processed_results.append(formatted_result)
-        print("PROCESSED RESULTS", processed_results)
         return SearchResponse(query=query, results=processed_results)
         
     except Exception as e:
@@ -219,7 +242,6 @@ async def get_collection_contents(
             # Get the base content_id (remove chunk suffix if present)
             item_id = item["id"].split('_')[0] if item["id"] else None
             content_id = metadata.get("content_id", item_id)
-            
             # Only process items that haven't been seen before
             if content_id and content_id not in seen_content_ids:
                 seen_content_ids.add(content_id)
@@ -530,3 +552,169 @@ async def test_url_handling(
             "error": str(e),
             "error_type": str(type(e))
         }
+
+@router.get("/documents/collections/contents", response_model=MultiCollectionDocumentResponse)
+async def get_multiple_document_collections_contents(
+    collections: List[str] = Query(
+        ..., 
+        description="List of document collections to fetch",
+        example=["notes", "documents"]
+    ),
+    offset: int = Query(0, description="Number of records to skip"),
+    limit: int = Query(50, description="Maximum number of records per collection"),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """Get paginated contents from multiple document collections"""
+    try:
+        result = {"collections": {}}
+        
+        # Split any items that might contain commas
+        expanded_collections = []
+        for collection in collections:
+            expanded_collections.extend(collection.split(','))
+        
+        # Remove any whitespace and convert to lowercase
+        collections = [c.strip().lower() for c in expanded_collections]
+        
+        for collection_name in collections:
+            seen_doc_ids = set()
+            contents = vector_store.get_collection_contents(
+                collection_name=collection_name,
+                offset=offset,
+                limit=limit
+            )
+            
+            # Format items for this collection
+            items = []
+            for item in contents["items"]:
+                metadata = item.get("metadata", {})
+                # Get base document ID (remove chunk suffix if present)
+                doc_id = item["id"].split('_')[0] if item["id"] else None
+                
+                # Only process items that haven't been seen before
+                if doc_id and doc_id not in seen_doc_ids:
+                    seen_doc_ids.add(doc_id)
+                    # Convert tags string to list if it exists
+                    tags = []
+                    if metadata.get("tags"):
+                        if isinstance(metadata["tags"], str):
+                            tags = [tag.strip() for tag in metadata["tags"].split(",")]
+                        elif isinstance(metadata["tags"], list):
+                            tags = metadata["tags"]
+                            
+                    items.append(DocumentListItem(
+                        id=doc_id,
+                        title=metadata.get("title", "Untitled Document"),
+                        file_type=metadata.get("file_type", "unknown"),
+                        tags=tags,  # Now passing the properly formatted tags
+                        created_date=metadata.get("created_date", datetime.utcnow().isoformat()),
+                        metadata=metadata
+                    ))
+                
+            result["collections"][collection_name] = DocumentListResponse(
+                total=len(items),
+                items=items
+            )
+            
+        return MultiCollectionDocumentResponse(**result)
+        
+    except Exception as e:
+        print("ERROR:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/document/{collection_name}/{document_id}", response_model=DocumentDetailResponse)
+async def get_document_detail(
+    collection_name: str,
+    document_id: str,
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """Get detailed document information"""
+    try:
+        print("\n=== GETTING DOCUMENT BY ID ===")
+        print("Document ID:", document_id)
+        print("Collection Name:", collection_name)
+        
+        # For documents, try get_by_id first since we don't use content_id
+        document_result = vector_store.get_by_id(collection_name, document_id)
+        if document_result and document_result["documents"]:
+            document = {
+                "documents": document_result["documents"],
+                "metadata": document_result["metadatas"][0] if document_result["metadatas"] else {}
+            }
+        else:
+            # Fall back to collection contents search
+            print("Document not found directly, trying collection contents...")
+            contents = vector_store.get_collection_contents(
+                collection_name=collection_name,
+                offset=0,
+                limit=100
+            )
+            
+            # Find the matching document
+            matching_items = [
+                item for item in contents["items"]
+                if item["id"].split('_')[0] == document_id
+            ]
+            
+            if matching_items:
+                document = {
+                    "documents": [item.get("document", "") for item in matching_items],
+                    "metadata": matching_items[0].get("metadata", {})
+                }
+            else:
+                raise HTTPException(status_code=404, detail="Document not found")
+
+        # Get base metadata
+        metadata = document["metadata"]
+        
+        # Convert tags string to list if it exists
+        tags = []
+        if metadata.get("tags"):
+            if isinstance(metadata["tags"], str):
+                tags = [tag.strip() for tag in metadata["tags"].split(",")]
+            elif isinstance(metadata["tags"], list):
+                tags = metadata["tags"]
+
+        # Normalize the response
+        response = DocumentDetailResponse(
+            id=document_id,
+            title=metadata.get("title", "Untitled Document"),
+            file_type=metadata.get("file_type", "unknown"),
+            content=document["documents"] if isinstance(document["documents"], list) else [document["documents"]],
+            tags=tags,
+            created_date=metadata.get("created_date", metadata.get("upload_date", datetime.utcnow().isoformat())),
+            processed_date=metadata.get("processed_date", datetime.utcnow().isoformat()),
+            metadata=metadata
+        )
+        
+        return response
+        
+    except Exception as e:
+        print("Error fetching document:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/document/{collection_name}/{document_id}", status_code=204)
+async def delete_document(
+    collection_name: str = Path(..., description="Name of the collection"),
+    document_id: str = Path(..., description="ID of the document to delete"),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """
+    Delete a document from a collection by ID.
+    Returns 204 on success with no content.
+    """
+    try:
+        # First verify the document exists
+        document_result = vector_store.get_by_id(collection_name, document_id)
+        if not document_result or not document_result["documents"]:
+            raise HTTPException(status_code=404, detail="Document not found")
+            
+        # Delete the document using direct ID
+        collection = vector_store.get_collection(collection_name)
+        collection.delete(ids=[document_id])
+        
+        return None  # 204 No Content
+        
+    except Exception as e:
+        print(f"Error deleting document: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

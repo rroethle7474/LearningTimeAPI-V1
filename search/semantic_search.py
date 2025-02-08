@@ -33,7 +33,7 @@ class SemanticSearch:
                 n_results=limit,
                 where=filters
             )
-            
+
             # print(f"Raw results for {collection}:", results)  # Debug print
             
             # Check if we got any results and if the first id list is empty
@@ -63,7 +63,22 @@ class SemanticSearch:
                 # Skip if any required field is empty
                 if not ids or not documents or not metadatas:
                     continue
+
+                # Find source_url from chunk_index 0 if available
+                source_url = None
+                content_id = metadatas[0].get('content_id')
+                if content_id:
+                    for meta in results["metadatas"][i]:
+                        if meta.get('chunk_index') == 0 and meta.get('source_url'):
+                            source_url = meta['source_url']
+                            break
                 
+                # Ensure source_url is included in metadata
+                if source_url:
+                    for meta in metadatas:
+                        if 'source_url' not in meta:
+                            meta['source_url'] = source_url
+
                 formatted_results.append({
                     "id": ids,
                     "content": documents,
