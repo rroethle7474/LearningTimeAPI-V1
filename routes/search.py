@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, HTTPException, Depends, Path
+from fastapi import APIRouter, Query, HTTPException, Depends, Path as FastAPIPath
 from typing import List, Optional, Dict, Any, Annotated
 from pydantic import BaseModel
 from db.vector_store import VectorStore
@@ -9,6 +9,7 @@ from urllib.parse import unquote
 # Import dependencies
 from dependencies import get_vector_store, get_embedding_generator, get_semantic_search
 from utils.duration import format_duration  # Add this import at the top
+from pathlib import Path as FilePath
 
 router = APIRouter()
 
@@ -102,6 +103,7 @@ def normalize_distance_score(distances: List[float]) -> float:
 def format_search_result(result: Dict[str, Any]) -> SearchResult:
     """Format a search result, including duration formatting"""
     metadata = result["metadata"][0]
+    print("Result", result)
     # Format duration if it exists and is a YouTube video
     if metadata.get("content_type") == "youtube" and "duration" in metadata:
         metadata = {**metadata, "duration": format_duration(metadata["duration"])}
@@ -219,7 +221,7 @@ async def find_similar_content(
 
 @router.get("/collection/{collection_name}/contents", response_model=ContentListResponse)
 async def get_collection_contents(
-    collection_name: str = Path(..., description="Name of the collection to fetch"),
+    collection_name: str = FastAPIPath(..., description="Name of the collection to fetch"),
     offset: int = Query(0, description="Number of records to skip"),
     limit: int = Query(50, description="Maximum number of records to return"),
     vector_store: VectorStore = Depends(get_vector_store)
@@ -322,7 +324,7 @@ async def get_multiple_collections_contents(
 
 @router.get("/content/{collection_name}/by-url")
 async def get_content_by_url(
-    collection_name: Annotated[str, Path(...)],
+    collection_name: Annotated[str, FastAPIPath(...)],
     source_url: Annotated[str, Query(...)],
     vector_store: Annotated[VectorStore, Depends(get_vector_store)]
 ):
@@ -404,8 +406,8 @@ async def get_content_detail(
 
 @router.delete("/content/{collection_name}/{content_id}", status_code=204)
 async def delete_content(
-    collection_name: str = Path(..., description="Name of the collection"),
-    content_id: str = Path(..., description="ID of the content to delete"),
+    collection_name: str = FastAPIPath(..., description="Name of the collection"),
+    content_id: str = FastAPIPath(..., description="ID of the content to delete"),
     vector_store: VectorStore = Depends(get_vector_store)
 ):
     """
@@ -695,24 +697,44 @@ async def get_document_detail(
 
 @router.delete("/document/{collection_name}/{document_id}", status_code=204)
 async def delete_document(
-    collection_name: str = Path(..., description="Name of the collection"),
-    document_id: str = Path(..., description="ID of the document to delete"),
+    collection_name: str = FastAPIPath(..., description="Name of the collection"),
+    document_id: str = FastAPIPath(..., description="ID of the document to delete"),
     vector_store: VectorStore = Depends(get_vector_store)
 ):
     """
-    Delete a document from a collection by ID.
+    Delete a document and all its chunks from a collection by ID.
     Returns 204 on success with no content.
     """
     try:
-        # First verify the document exists
-        document_result = vector_store.get_by_id(collection_name, document_id)
-        if not document_result or not document_result["documents"]:
+        # First verify the document exists using the new method
+        document_result = vector_store.get_document_by_id(collection_name, document_id)
+        print("DOCUMENT RESULTSSS", document_result)
+        if not document_result:
             raise HTTPException(status_code=404, detail="Document not found")
-            
-        # Delete the document using direct ID
-        collection = vector_store.get_collection(collection_name)
-        collection.delete(ids=[document_id])
         
+        # Try to delete the physical file if it exists
+        file_deleted = False
+        if document_result["metadatas"]:
+            # Get the source_file path from the last metadata entry (full document)
+            source_file = document_result["metadatas"][-1].get("source_file")
+            if source_file:
+                file_path = FilePath(source_file)  # Use the renamed Path
+                try:
+                    if file_path.exists():
+                        file_path.unlink()
+                        file_deleted = True
+                        print(f"Successfully deleted file: {source_file}")
+                except Exception as file_error:
+                    print(f"Error deleting file {source_file}: {str(file_error)}")
+                    # Continue with ChromaDB deletion even if file deletion fails
+        
+        # Delete from ChromaDB regardless of file deletion status
+        collection = vector_store.get_collection(collection_name)
+        collection.delete(ids=document_result["ids"])
+        
+        if not file_deleted:
+            print("No physical file was deleted, but document was removed from ChromaDB")
+            
         return None  # 204 No Content
         
     except Exception as e:

@@ -121,7 +121,7 @@ class VectorStore:
     def get_collection(self, content_type: str) -> Any:
         """Get collection by content type or collection name"""
         # First check if this is a direct collection name
-        if content_type in ["articles_content", "youtube_content", "tutorials", "tutorial_sections"]:
+        if content_type in ["articles_content", "youtube_content", "tutorials", "tutorial_sections", "notes"]:
             try:
                 return self.client.get_collection(name=content_type)
             except Exception as e:
@@ -132,7 +132,6 @@ class VectorStore:
             "article": "articles_content",
             "youtube": "youtube_content",
             "youtubes_content": "youtube_content",
-            "notes": "notes"
         }
         
         collection_name = collection_map.get(content_type)
@@ -434,10 +433,26 @@ class VectorStore:
             Dictionary containing document content and metadata, or None if not found
         """
         try:
+            # First try direct ID lookup
             result = self.documents.get(
                 ids=[document_id]
             )
             
+            # If not found, try searching where is_chunk is False
+            if not result["ids"]:
+                result = self.documents.get(
+                    where={
+                        "id": document_id,
+                        "is_chunk": False
+                    }
+                )
+                
+            if not result["ids"]:
+                # Try one more time without the is_chunk filter
+                result = self.documents.get(
+                    where={"id": document_id}
+                )
+                
             if not result["ids"]:
                 return None
                 
@@ -460,16 +475,30 @@ class VectorStore:
 
     def delete_document(self, document_id: str) -> None:
         """
-        Delete a document by its ID
+        Delete a document and all its associated chunks by document ID
         
         Args:
             document_id: The ID of the document to delete
         """
         try:
-            self.documents.delete(
-                ids=[document_id]
+            # First get the document to check if it exists and get chunk IDs
+            document = self.get_document(document_id)
+            if not document:
+                raise ValueError(f"Document not found: {document_id}")
+            
+            # Get all chunks associated with this document
+            chunks = self.documents.get(
+                where={"document_id": document_id, "is_chunk": True}
             )
-            logger.debug(f"Successfully deleted document {document_id}")
+            
+            # Delete all chunks
+            if chunks and chunks["ids"]:
+                self.documents.delete(ids=chunks["ids"])
+            
+            # Delete the full document
+            self.documents.delete(ids=[document_id])
+            
+            logger.debug(f"Successfully deleted document {document_id} and its chunks")
         except Exception as e:
             logger.error(f"Error deleting document {document_id}: {str(e)}")
             raise
@@ -536,4 +565,114 @@ class VectorStore:
             logger.info(f"Successfully deleted collection: {collection_name}")
         except Exception as e:
             logger.error(f"Error deleting collection {collection_name}: {str(e)}")
+            raise
+
+    def delete_tutorial_by_content_id(self, content_id: str) -> None:
+        """Delete a tutorial and its sections based on the source content_id"""
+        try:
+            # First find the tutorial that matches this content_id
+            results = self.tutorials.get(
+                where={"content_id": content_id}
+            )
+            
+            if not results or not results["ids"]:
+                raise ValueError(f"No tutorial found for content_id: {content_id}")
+            
+            tutorial_id = results["ids"][0]
+            tutorial_data = json.loads(results["documents"][0])
+            
+            # Delete the tutorial
+            self.tutorials.delete(
+                ids=[tutorial_id]
+            )
+            
+            # Delete all associated sections
+            section_ids = [section["id"] for section in tutorial_data["sections"]]
+            if section_ids:
+                self.tutorial_sections.delete(
+                    ids=section_ids
+                )
+            
+            return tutorial_id
+            
+        except Exception as e:
+            logger.error(f"Error deleting tutorial for content {content_id}: {str(e)}")
+            raise
+
+    def delete_tutorial_by_source_url(self, source_url: str) -> None:
+        """Delete a tutorial and its sections based on the source URL"""
+        try:
+            # First find the tutorial that matches this source_url in metadata
+            results = self.tutorials.get(
+                where={"metadata.source_url": source_url}  # Look in metadata
+            )
+            
+            if not results or not results["ids"]:
+                # Try without the query parameters if not found
+                base_url = source_url.split('?')[0]
+                results = self.tutorials.get(
+                    where={"metadata.source_url": base_url}
+                )
+                
+            if not results or not results["ids"]:
+                raise ValueError(f"No tutorial found for source_url: {source_url}")
+            
+            tutorial_id = results["ids"][0]
+            tutorial_data = json.loads(results["documents"][0])
+            
+            # Delete the tutorial
+            self.tutorials.delete(
+                ids=[tutorial_id]
+            )
+            
+            # Delete all associated sections
+            section_ids = [section["id"] for section in tutorial_data["sections"]]
+            if section_ids:
+                self.tutorial_sections.delete(
+                    ids=section_ids
+                )
+            
+            return tutorial_id
+            
+        except Exception as e:
+            logger.error(f"Error deleting tutorial for source_url {source_url}: {str(e)}")
+            raise
+
+    def get_document_by_id(self, collection_name: str, document_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a document and its chunks using document_id
+        
+        Args:
+            collection_name: Name of the collection to search in
+            document_id: The document_id to search for
+            
+        Returns:
+            Document data if found, None otherwise
+        """
+        try:
+            collection = self.get_collection(collection_name)
+            # Get all documents and chunks
+            result = collection.get()
+            
+            if not result or not result["ids"]:
+                return None
+            
+            # Find all IDs that match our document_id (either exact or as prefix for chunks)
+            matching_indices = [
+                i for i, id in enumerate(result["ids"])
+                if id.startswith(document_id)
+            ]
+            
+            if not matching_indices:
+                return None
+            
+            # Collect all matching documents and their metadata
+            return {
+                "ids": [result["ids"][i] for i in matching_indices],
+                "documents": [result["documents"][i] for i in matching_indices],
+                "metadatas": [result["metadatas"][i] for i in matching_indices]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting document by ID {document_id}: {str(e)}")
             raise

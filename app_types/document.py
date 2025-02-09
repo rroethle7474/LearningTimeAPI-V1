@@ -9,6 +9,7 @@ class DocumentMetadata(BaseModel):
     file_size: int
     upload_date: datetime
     source_file: str
+    original_filename: str
 
 class DocumentSubmission(BaseModel):
     title: str

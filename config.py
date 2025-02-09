@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     ENABLE_TELEMETRY: bool = False
     
+    # Add document upload path with type annotation
+    DOCUMENT_UPLOAD_PATH: str = "./uploads/documents"  # You can change this path as needed
+    
     class Config:
         env_file = ".env"
 

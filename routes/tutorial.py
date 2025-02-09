@@ -14,6 +14,7 @@ from dependencies import (
     get_llm_client,
     get_tutorial_generator
 )
+from urllib.parse import unquote
 
 router = APIRouter(tags=["tutorials"])
 
@@ -167,6 +168,7 @@ class TutorialListItem(BaseModel):
     source_type: Optional[str]
     section_count: int
     metadata: Dict[str, Any]
+    source_url: Optional[str] = ""
 
 class TutorialListResponse(BaseModel):
     total: int
@@ -195,13 +197,13 @@ async def list_tutorials(
             
             # Get metadata from the tutorial_data
             tutorial_metadata = tutorial_data.get("metadata", {})
-            
+            print("TUTORIAL METADATA", tutorial_metadata)
             # Get the first section's content as description (usually the summary)
             description = ""
             sections = tutorial_data.get("sections", [])
             if sections and sections[0]["type"] == "summary":
                 description = sections[0]["content"]
-            
+
             items.append(TutorialListItem(
                 id=item["id"],
                 title=tutorial_metadata.get("title", "Untitled"),  # Title is in metadata
@@ -209,12 +211,15 @@ async def list_tutorials(
                 generated_date=datetime.fromisoformat(tutorial_metadata["generated_date"]),
                 source_type=tutorial_metadata.get("content_type"),  # content_type is in metadata
                 section_count=len(sections),
-                metadata=item.get("metadata", {})
+                metadata=item.get("metadata", {}),
+                source_url=tutorial_metadata.get("source_url", "")
             ))
             
+
+
         tutorial_list_response = TutorialListResponse(
             total=contents["total"],
-            items=items
+            items=items,
         )
         
         return tutorial_list_response
@@ -302,4 +307,46 @@ async def delete_tutorial(
         
     except Exception as e:
         print(f"Error deleting tutorial: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/tutorials/content/{content_id}", status_code=204)
+async def delete_tutorial_by_content(
+    content_id: str = Path(..., description="ID of the source content"),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """
+    Delete a tutorial and its sections based on the source content ID.
+    Returns 204 on success with no content.
+    """
+    try:
+        tutorial_id = vector_store.delete_tutorial_by_content_id(content_id)
+        print(f"Successfully deleted tutorial for content {content_id} (tutorial_id: {tutorial_id})")
+        return None  # 204 No Content
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        print(f"Error deleting tutorial by content: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/tutorials/url", status_code=204)
+async def delete_tutorial_by_url(
+    source_url: str = Query(..., description="Source URL of the content"),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """
+    Delete a tutorial and its sections based on the source URL.
+    Returns 204 on success with no content.
+    """
+    try:
+        # URL decode the source_url parameter
+        decoded_url = unquote(source_url)
+        tutorial_id = vector_store.delete_tutorial_by_source_url(decoded_url)
+        print(f"Successfully deleted tutorial for URL {decoded_url} (tutorial_id: {tutorial_id})")
+        return None  # 204 No Content
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        print(f"Error deleting tutorial by URL: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e)) 
