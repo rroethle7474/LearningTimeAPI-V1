@@ -6,6 +6,7 @@ import os
 from fastapi.responses import JSONResponse, FileResponse
 from pathlib import Path
 from config import settings
+import logging
 
 from db.vector_store import VectorStore
 from processors.document_processor import DocumentProcessor
@@ -14,6 +15,8 @@ from app_types.document import DocumentStatus, DocumentMetadata
 from dependencies import get_vector_store, get_embedding_generator, get_document_processor
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 def sanitize_filename(filename: str) -> str:
     """Convert filename to a safe version"""
@@ -228,22 +231,65 @@ async def download_document(
     """
     Download the original document file by document ID
     """
-    # Get document metadata from vector store
-    document = vector_store.get_document(document_id)
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    # Get source file path from metadata
-    source_file = Path(document["metadata"]["source_file"])
-    if not source_file.exists():
-        raise HTTPException(
-            status_code=404, 
-            detail="Original file no longer exists on server"
+    try:
+        # Add logging right at the start of the function
+        logger.info("=== Starting download request ===")
+        logger.info(f"Route hit: /api/document/{document_id}/download")
+        
+        # Get document metadata from vector store
+        logger.info(f"Downloading document with ID: {document_id}")
+        document = vector_store.get_document(document_id)
+        
+        if not document:
+            logger.error(f"Document not found: {document_id}")
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Get source file path and original filename from metadata
+        source_file = Path(document["metadata"]["source_file"])
+        original_filename = document["metadata"].get("original_filename")
+        logger.info(f"Source file: {source_file}")
+        logger.info(f"Original filename: {original_filename}")
+        
+        if not source_file.exists():
+            logger.error(f"File not found on disk: {source_file}")
+            raise HTTPException(
+                status_code=404, 
+                detail="Original file no longer exists on server"
+            )
+        
+        # Determine the media type based on file extension
+        file_ext = source_file.suffix.lower()
+        logger.info(f"File extension: {file_ext}")
+        media_type_map = {
+            '.pdf': 'application/pdf',
+            '.txt': 'text/plain',
+            '.doc': 'application/msword',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        }
+        media_type = media_type_map.get(file_ext, 'application/octet-stream')
+        logger.info(f"Media type: {media_type}")
+        
+        # Log before returning response
+        logger.info("=== Sending file response ===")
+        
+        # Return the file as a download response with original filename and correct media type
+        return FileResponse(
+            path=source_file,
+            filename=original_filename,
+            media_type=media_type,
+            headers={
+                "Access-Control-Expose-Headers": "Content-Disposition",
+                "Content-Disposition": f'attachment; filename="{original_filename}"'
+            }
         )
-    
-    # Return the file as a download response
-    return FileResponse(
-        path=source_file,
-        filename=document["metadata"].get("original_filename", source_file.name),
-        media_type="application/octet-stream"
-    ) 
+    except Exception as e:
+        logger.exception("Error in download_document route")
+        raise 
+
+@router.get("/test-logging")
+async def test_logging():
+    """
+    Test route to verify logging is working
+    """
+    logger.info("Test logging route hit")
+    return {"message": "Logging test successful"} 
