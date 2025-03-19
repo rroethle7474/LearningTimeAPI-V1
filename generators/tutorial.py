@@ -130,7 +130,6 @@ class TutorialGenerator:
             response = await self.llm.generate(prompt)
             tutorial_text = response.text
             tutorial_data = json.loads(tutorial_text)
-            print("IS THIS THE RESPONSE", tutorial_data)
             
             # Move format_content to be a method of the class
             tutorial = ProcessedTutorial(
@@ -211,7 +210,6 @@ class TutorialGenerator:
             f"{section.title} {section.content}" for section in tutorial.sections
         )
         tutorial_embedding = self.embedding_generator.generate([tutorial_text])[0]
-        print("TUTORIAL EMBEDDING", tutorial_embedding)
         # Store tutorial using the new schema
         tutorial_id = str(uuid.uuid4())
         self.vector_store.add_tutorial(

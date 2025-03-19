@@ -103,7 +103,6 @@ def normalize_distance_score(distances: List[float]) -> float:
 def format_search_result(result: Dict[str, Any]) -> SearchResult:
     """Format a search result, including duration formatting"""
     metadata = result["metadata"][0]
-    print("Result", result)
     # Format duration if it exists and is a YouTube video
     if metadata.get("content_type") == "youtube" and "duration" in metadata:
         metadata = {**metadata, "duration": format_duration(metadata["duration"])}
@@ -124,8 +123,6 @@ async def search_single_collection(
     semantic_search: SemanticSearch = Depends(get_semantic_search)
 ):
     """Search within a single collection"""
-    print("SEARCHING SINGLE COLLECTION", query)
-    print("COLLECTION", collection)
     try:
         results = await semantic_search.search(
             query=query,
@@ -134,7 +131,6 @@ async def search_single_collection(
         )
         # Transform the results to match the SearchResult model
         processed_results = []
-        print("HMMMM")
         for result in results["results"]:
             formatted_result = format_search_result(result)
             if formatted_result.distance >= min_similarity:

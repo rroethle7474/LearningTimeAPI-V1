@@ -86,21 +86,16 @@ async def process_content_task(
             # Process content and get metadata with summary
             metadata, chunks = await processor.process_content(url_str, content_type)
             logger.debug(f"Successfully processed content, got {len(chunks)} chunks")
-            print("CHUNKS", chunks)
             # Update task status with summary immediately after generation
             tasks[task_id].update({
                 "status": "processing",
                 "summary": metadata.summary  # Make summary available early
             })
-            print("METADATA", metadata)
             # Generate embeddings
             embeddings = processor.generate_embeddings(chunks)
             print("EMBEDDINGS FOR ARTICLE", embeddings)
             logger.debug("Generated embeddings")
             
-
-            # Store in vector store
-            print(f"Storing in {content_type}")
             if content_type == "article":
                 collection_name = "articles_content"
             elif content_type == "youtube":

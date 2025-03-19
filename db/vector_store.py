@@ -94,7 +94,6 @@ class VectorStore:
 
     def get_tutorial_with_sections(self, tutorial_id: str) -> Dict[str, Any]:
         """Retrieve a tutorial with all its sections"""
-        print("GET TUTORIAL WITH SECTIONS", tutorial_id)
         tutorial = self.tutorials.get(ids=[tutorial_id])
         if not tutorial or not tutorial["documents"]:
             raise ValueError(f"Tutorial not found: {tutorial_id}")
@@ -287,12 +286,10 @@ class VectorStore:
     def get_content_by_id(self, content_id: str, content_type: str) -> Optional[Dict[str, Any]]:
         """Get all chunks and metadata for a specific content_id"""
         collection = self.get_collection(content_type)
-        print("COLLECTION", collection)
         # Query for all chunks with this content_id
         results = collection.get(
             where={"content_id": content_id}
         )
-        print("RESULTS", results)
         if not results or not results["ids"]:
             return None
         

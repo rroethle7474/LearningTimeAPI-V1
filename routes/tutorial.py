@@ -197,7 +197,6 @@ async def list_tutorials(
             
             # Get metadata from the tutorial_data
             tutorial_metadata = tutorial_data.get("metadata", {})
-            print("TUTORIAL METADATA", tutorial_metadata)
             # Get the first section's content as description (usually the summary)
             description = ""
             sections = tutorial_data.get("sections", [])
@@ -238,7 +237,6 @@ async def get_tutorial_detail(
         tutorial_data = vector_store.get_tutorial_with_sections(tutorial_id)
         if not tutorial_data:
             raise HTTPException(status_code=404, detail="Tutorial not found")
-        print("TUTORIAL DATA", tutorial_data)
         
         # Convert the tutorial data into our response model
         sections = []
@@ -252,7 +250,6 @@ async def get_tutorial_detail(
                 order=i,  # Use the index as the order
                 metadata=section["metadata"]
             ))
-        print("SECTIONS", sections)
         
         # Get metadata fields from the correct location
         metadata = tutorial_data["metadata"]
