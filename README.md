@@ -189,7 +189,7 @@ The API uses FastAPI's dependency injection for service management:
    cd LearningTimeAPI-V1
    ```
 
-2. Create and activate a virtual environment: (It is recommended to place the virtual environment outside of the solution folder used by the IDE. If placed in the same folder, indexing could occur which may cause performance issues with the IDE.)
+2. Create and activate a virtual environment: (It is recommended to place the virtual environment outside of the solution folder used by the IDE. If placed in the same folder, indexing could occur which may cause performance issues with the IDE.) For my local machine, I have a folder inside of PythonVirtualEnv --> v1_311.
    ```bash
    python -m venv venv
    # On Windows
@@ -373,7 +373,7 @@ This API relies on several external services:
 1. **ChromaDB**: For vector storage and semantic search capabilities
    - Sign up at [ChromaDB](https://www.trychroma.com/)
    - Follow their documentation to set up your instance
-
+   -To view please see CHROMADB-VIEWER.md for more details.
 2. **OpenAI API** or **Anthropic API**: At least one is required for LLM capabilities
    - For OpenAI: Sign up at [OpenAI Platform](https://platform.openai.com/)
    - For Anthropic: Sign up at [Anthropic](https://www.anthropic.com/)
